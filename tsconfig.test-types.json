@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@shadow-js/web",
+    "noEmit": true,
+    "isolatedDeclarations": false,
+    "paths": {
+      "@shadow-js/dusk": ["./src/index.ts"],
+      "@shadow-js/dusk/server": ["./src/server/index.ts"],
+      "@shadow-js/dusk/client": ["./src/client/index.ts"],
+      "@shadow-js/dusk/client/stream": ["./src/client/stream.ts"]
+    }
+  },
+  "include": ["test-types", "types"]
+}

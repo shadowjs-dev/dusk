@@ -1,0 +1,289 @@
+{
+  "name": "@shadow-js/dusk",
+  "version": "1.0.0",
+  "description": "A full-stack framework with file routes, loaders, server functions and secure request handling",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "bin": {
+    "dusk": "./dist/cli/index.js"
+  },
+  "exports": {
+    "./client/stream": {
+      "types": "./dist/dev/client/stream.d.ts",
+      "development": "./dist/dev/client/stream.js",
+      "default": "./dist/prod/client/stream.js"
+    },
+    ".": {
+      "types": "./dist/dev/index.d.ts",
+      "development": "./dist/dev/index.js",
+      "default": "./dist/prod/index.js"
+    },
+    "./server": {
+      "types": "./dist/dev/server/index.d.ts",
+      "development": "./dist/dev/server/index.js",
+      "default": "./dist/prod/server/index.js"
+    },
+    "./node": {
+      "types": "./dist/dev/node/index.d.ts",
+      "development": "./dist/dev/node/index.js",
+      "default": "./dist/prod/node/index.js"
+    },
+    "./testing": {
+      "types": "./dist/dev/testing/index.d.ts",
+      "development": "./dist/dev/testing/index.js",
+      "default": "./dist/prod/testing/index.js"
+    },
+    "./static": {
+      "types": "./dist/dev/static/index.d.ts",
+      "development": "./dist/dev/static/index.js",
+      "default": "./dist/prod/static/index.js"
+    },
+    "./client": {
+      "types": "./dist/dev/client/index.d.ts",
+      "development": "./dist/dev/client/index.js",
+      "default": "./dist/prod/client/index.js"
+    },
+    "./auth": {
+      "types": "./dist/dev/auth/index.d.ts",
+      "development": "./dist/dev/auth/index.js",
+      "default": "./dist/prod/auth/index.js"
+    },
+    "./og": {
+      "types": "./dist/dev/og/index.d.ts",
+      "development": "./dist/dev/og/index.js",
+      "default": "./dist/prod/og/index.js"
+    },
+    "./components": {
+      "types": "./dist/dev/components/index.d.ts",
+      "browser": {
+        "development": "./dist/dev/components/index.js",
+        "default": "./dist/prod/components/index.js"
+      },
+      "node": {
+        "development": "./dist/server-dev/components/index.js",
+        "default": "./dist/server/components/index.js"
+      },
+      "worker": {
+        "development": "./dist/server-dev/components/index.js",
+        "default": "./dist/server/components/index.js"
+      },
+      "deno": {
+        "development": "./dist/server-dev/components/index.js",
+        "default": "./dist/server/components/index.js"
+      },
+      "bun": {
+        "development": "./dist/server-dev/components/index.js",
+        "default": "./dist/server/components/index.js"
+      },
+      "development": "./dist/dev/components/index.js",
+      "default": "./dist/prod/components/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "default": "./dist/vite/index.js"
+    },
+    "./package.json": "./package.json",
+    "./bun": {
+      "types": "./dist/dev/bun/index.d.ts",
+      "development": "./dist/dev/bun/index.js",
+      "default": "./dist/prod/bun/index.js"
+    },
+    "./deno": {
+      "types": "./dist/dev/deno/index.d.ts",
+      "development": "./dist/dev/deno/index.js",
+      "default": "./dist/prod/deno/index.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/dev/cloudflare/index.d.ts",
+      "development": "./dist/dev/cloudflare/index.js",
+      "default": "./dist/prod/cloudflare/index.js"
+    },
+    "./vercel": {
+      "types": "./dist/dev/vercel/index.d.ts",
+      "development": "./dist/dev/vercel/index.js",
+      "default": "./dist/prod/vercel/index.js"
+    },
+    "./netlify": {
+      "types": "./dist/dev/netlify/index.d.ts",
+      "development": "./dist/dev/netlify/index.js",
+      "default": "./dist/prod/netlify/index.js"
+    },
+    "./tarout": {
+      "types": "./dist/dev/tarout/index.d.ts",
+      "development": "./dist/dev/tarout/index.js",
+      "default": "./dist/prod/tarout/index.js"
+    },
+    "./features/pages": {
+      "types": "./dist/dev/features/pages.d.ts",
+      "development": "./dist/dev/features/pages.js",
+      "default": "./dist/prod/features/pages.js"
+    },
+    "./features/dynamic-params": {
+      "types": "./dist/dev/features/dynamic-params.d.ts",
+      "development": "./dist/dev/features/dynamic-params.js",
+      "default": "./dist/prod/features/dynamic-params.js"
+    },
+    "./features/metadata": {
+      "types": "./dist/dev/features/metadata.d.ts",
+      "development": "./dist/dev/features/metadata.js",
+      "default": "./dist/prod/features/metadata.js"
+    },
+    "./features/data-cache": {
+      "types": "./dist/dev/features/data-cache.d.ts",
+      "development": "./dist/dev/features/data-cache.js",
+      "default": "./dist/prod/features/data-cache.js"
+    },
+    "./features/isr": {
+      "types": "./dist/dev/features/isr.d.ts",
+      "development": "./dist/dev/features/isr.js",
+      "default": "./dist/prod/features/isr.js"
+    },
+    "./stores/redis": {
+      "types": "./dist/dev/stores/redis.d.ts",
+      "development": "./dist/dev/stores/redis.js",
+      "default": "./dist/prod/stores/redis.js"
+    },
+    "./stores/contract": {
+      "types": "./dist/dev/stores/contract.d.ts",
+      "development": "./dist/dev/stores/contract.js",
+      "default": "./dist/prod/stores/contract.js"
+    },
+    "./features/rpc": {
+      "types": "./dist/dev/features/rpc.d.ts",
+      "development": "./dist/dev/features/rpc.js",
+      "default": "./dist/prod/features/rpc.js"
+    },
+    "./features/api-routes": {
+      "types": "./dist/dev/features/api-routes.d.ts",
+      "development": "./dist/dev/features/api-routes.js",
+      "default": "./dist/prod/features/api-routes.js"
+    },
+    "./features/streams": {
+      "types": "./dist/dev/features/streams.d.ts",
+      "development": "./dist/dev/features/streams.js",
+      "default": "./dist/prod/features/streams.js"
+    },
+    "./features/images": {
+      "types": "./dist/dev/features/images.d.ts",
+      "development": "./dist/dev/features/images.js",
+      "default": "./dist/prod/features/images.js"
+    },
+    "./features/draft-mode": {
+      "types": "./dist/dev/features/draft-mode.d.ts",
+      "development": "./dist/dev/features/draft-mode.js",
+      "default": "./dist/prod/features/draft-mode.js"
+    },
+    "./features/routing": {
+      "types": "./dist/dev/features/routing.d.ts",
+      "development": "./dist/dev/features/routing.js",
+      "default": "./dist/prod/features/routing.js"
+    },
+    "./features/pwa": {
+      "types": "./dist/dev/features/pwa.d.ts",
+      "development": "./dist/dev/features/pwa.js",
+      "default": "./dist/prod/features/pwa.js"
+    },
+    "./i18n": {
+      "types": "./dist/dev/i18n/server.d.ts",
+      "development": "./dist/dev/i18n/server.js",
+      "default": "./dist/prod/i18n/server.js"
+    },
+    "./i18n/client": {
+      "types": "./dist/dev/i18n/client.d.ts",
+      "development": "./dist/dev/i18n/client.js",
+      "default": "./dist/prod/i18n/client.js"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --config-loader native",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test-types.json",
+    "typecheck:types": "tsc -p tsconfig.test-types.json",
+    "lint": "biome check .",
+    "test": "vitest run --project unit --project dom --project server",
+    "test:gc": "vitest run --project gc --passWithNoTests",
+    "test:perf": "vitest run --project perf --passWithNoTests",
+    "check": "npm run lint && npm run typecheck && npm run build && npm test && npm run test:perf && npm run test:gc"
+  },
+  "dependencies": {
+    "@shadow-js/query": "1.0.0",
+    "@shadow-js/vite": "1.0.0",
+    "acorn": "8.19.0",
+    "magic-string": "^1.4.3"
+  },
+  "peerDependencies": {
+    "@resvg/resvg-wasm": "^2.6.2",
+    "@shadow-js/core": "^1.0.0",
+    "@shadow-js/i18n": "^1.0.0",
+    "@shadow-js/router": "^1.0.0",
+    "@shadow-js/web": "^1.0.0",
+    "satori": "^0.43.0",
+    "sharp": "^0.35.5",
+    "subset-font": "^2.9.0",
+    "vite": "^7.0.0 || ^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@resvg/resvg-wasm": {
+      "optional": true
+    },
+    "@shadow-js/i18n": {
+      "optional": true
+    },
+    "satori": {
+      "optional": true
+    },
+    "sharp": {
+      "optional": true
+    },
+    "subset-font": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@resvg/resvg-wasm": "2.6.2",
+    "@shadow-js/compiler": "^1.0.0",
+    "@shadow-js/core": "^1.0.0",
+    "@shadow-js/i18n": "^1.0.0",
+    "@shadow-js/router": "^1.0.0",
+    "@shadow-js/web": "^1.0.0",
+    "@types/node": "^24.0.0",
+    "fast-check": "^4.10.2",
+    "happy-dom": "^21.0.3",
+    "satori": "0.43.0",
+    "sharp": "0.35.5",
+    "subset-font": "2.9.0",
+    "tsdown": "0.23.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3",
+    "zod": "4.6.5"
+  },
+  "homepage": "https://dusk.shadowjs.net",
+  "keywords": [
+    "shadowjs",
+    "dusk"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadowjs-dev/dusk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shadowjs-dev/dusk/issues"
+  }
+}

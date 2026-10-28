@@ -195,10 +195,17 @@ describe("fragments never reach the server (G-C4)", () => {
     expect(raw).toContain('"hash":""');
   });
 
-  it("[G-C4] a configured redirect destination with a # is refused at startup", async () => {
+  it("[G-C4] a configured redirect may send a fragment to the browser; a rewrite may not have one", async () => {
+    const handler = await bootWithApi(
+      {},
+      { routing: { redirects: [{ source: "/old", destination: "/new#top" }] } },
+    );
+    const response = await handler.fetch(new Request("http://localhost/old"));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("/new#top");
     await expect(
-      bootWithApi({}, { routing: { redirects: [{ source: "/old", destination: "/new#top" }] } }),
-    ).rejects.toThrow(/must not contain a fragment/);
+      bootWithApi({}, { routing: { rewrites: [{ source: "/old", destination: "/new#top" }] } }),
+    ).rejects.toThrow(/rewrite must not contain a fragment/);
   });
 });
 
@@ -489,7 +496,7 @@ describe("redirect conditions and query (G-C9)", () => {
     );
   });
 
-  it("[G-C9] a destination with a # is refused at startup (a fragment never reaches the server)", async () => {
+  it("[G-C9] a rewrite destination with a # is refused at startup (a fragment never reaches the server)", async () => {
     const app = await loadApp();
     expect(() =>
       createHandler({
@@ -497,7 +504,7 @@ describe("redirect conditions and query (G-C9)", () => {
         manifest: manifestOf(app),
         dev: true,
         onError: () => undefined,
-        routing: { redirects: [{ source: "/g9/old", destination: "/new#top" }] },
+        routing: { rewrites: [{ source: "/g9/old", destination: "/new#top" }] },
       }),
     ).toThrow(/fragment/);
   });

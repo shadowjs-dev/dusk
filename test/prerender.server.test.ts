@@ -405,6 +405,42 @@ describe("prerender and the host check", () => {
     ).rejects.toMatchObject({ code: "PRERENDER_REDIRECT", message: /another origin/ });
   });
 
+  it("[SPRE-16] the meta-refresh page of a redirect keeps its query and its fragment", async () => {
+    const dir = out();
+    const redirecting = {
+      fetch: async () =>
+        new Response(null, { status: 308, headers: { location: "/?ref=mail#download" } }),
+    };
+    await prerender({
+      handler: redirecting,
+      outDir: dir,
+      paths: ["/old-download"],
+      onRedirect: "html",
+      shell: false,
+      notFoundPath: false,
+    });
+    const page = readFileSync(join(dir, "old-download/index.html"), "utf8");
+    expect(page).toContain('http-equiv="refresh" content="0;url=/?ref=mail#download"');
+    expect(page).toContain('<link rel="canonical" href="/?ref=mail#download">');
+  });
+
+  it("[SPRE-17] a redirect of dusk.config.ts to a path with a fragment becomes a page that goes there, query and fragment included", async () => {
+    const dir = out();
+    const real = await handler({
+      routing: { redirects: [{ source: "/old-download", destination: "/#download" }] },
+    });
+    await prerender({
+      handler: real,
+      outDir: dir,
+      paths: ["/old-download"],
+      onRedirect: "html",
+      shell: false,
+      notFoundPath: false,
+    });
+    const page = readFileSync(join(dir, "old-download/index.html"), "utf8");
+    expect(page).toContain('http-equiv="refresh" content="0;url=/#download"');
+  });
+
   it("[SPRH-09] the meta-refresh page escapes the target", async () => {
     const dir = out();
     const hostile = {

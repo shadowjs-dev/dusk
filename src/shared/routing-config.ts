@@ -274,6 +274,19 @@ function captureNames(pattern: CompiledPattern): Set<string> {
   return names;
 }
 
+/**
+ * Splits a destination at its fragment: `/a?x=1#top` is `["/a?x=1", "#top"]`. The fragment starts at the first `#` and
+ * runs to the end, so a `?` after it is part of the fragment, not a query.
+ *
+ * @param text A destination template or a target.
+ * @returns The part before the fragment, and the fragment with its `#` (`""` when there is none).
+ * @internal
+ */
+export function splitFragment(text: string): readonly [string, string] {
+  const at = text.indexOf("#");
+  return at === -1 ? [text, ""] : [text.slice(0, at), text.slice(at)];
+}
+
 /** Validates a destination. Paths are internal; absolute URLs need a trusted origin. @internal */
 function destinationOf(
   where: string,
@@ -292,9 +305,14 @@ function destinationOf(
   if (raw.startsWith("//"))
     throw new TypeError(`${where}.destination must not start with "//" (a foreign host).`);
   if (raw.startsWith("/")) {
-    const queryAt = raw.indexOf("?");
-    const path = queryAt === -1 ? raw : raw.slice(0, queryAt);
-    if (raw.includes("#")) throw new TypeError(`${where}.destination must not contain a fragment.`);
+    // A redirect may end in a fragment: the browser keeps it from the `Location` header (`/old` to `/#download`). A
+    // rewrite may not, because the server never sees one.
+    const [beforeFragment, fragment] = splitFragment(raw);
+    if (fragment !== "" && kind === "rewrite") {
+      throw new TypeError(`${where}.destination of a rewrite must not contain a fragment.`);
+    }
+    const queryAt = beforeFragment.indexOf("?");
+    const path = queryAt === -1 ? beforeFragment : beforeFragment.slice(0, queryAt);
     if (kind === "rewrite" && (path === "/_dusk" || path.startsWith("/_dusk/"))) {
       throw new TypeError(
         `${where}.destination must not point under /_dusk/ (the framework's own routes).`,

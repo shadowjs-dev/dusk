@@ -33,6 +33,8 @@ export interface PrerenderFailureEvent {
   readonly error: unknown;
   /** True for a path the build listed; false for a path the crawl found. */
   readonly explicit: boolean;
+  /** For a path the crawl found: the page whose link led to it. */
+  readonly from?: string;
 }
 
 /** What to prerender at build time. @since 1.0.0 */
@@ -70,6 +72,12 @@ export interface PrerenderOptions {
   readonly concurrency?: number;
   /** A response that is not 200 fails the build. Default true. */
   readonly failOnError?: boolean;
+  /**
+   * A listed path that matches no route (it was removed or renamed) is skipped with a warning instead of failing the
+   * build. The warning names the path, where it was listed and the closest route. Any other failure still fails the
+   * build. Default false.
+   */
+  readonly skipMissing?: boolean;
 }
 
 /** Options of {@link dusk}. @since 1.0.0 */

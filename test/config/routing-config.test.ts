@@ -64,6 +64,51 @@ describe("routing config validation", () => {
     }
   });
 
+  it("[RCFG-11] a redirect destination may end in a fragment, internal or absolute; the text is kept", () => {
+    const routing = ok({
+      redirects: [
+        { source: "/old-download", destination: "/#download" },
+        { source: "/docs", destination: "/guide?v=2#install" },
+        { source: "/p", destination: "https://partner.example/start#top" },
+        { source: "/empty", destination: "/page#" },
+        { source: "/q", destination: "/page#a?b=c:d" },
+      ],
+      routeRules: { "/rule": { redirect: { to: "/#pricing" } } },
+    });
+    expect(routing.redirects.map((rule) => rule.destination.template)).toEqual([
+      "/#download",
+      "/guide?v=2#install",
+      "https://partner.example/start#top",
+      "/page#",
+      "/page#a?b=c:d",
+    ]);
+    expect(routing.redirects[2]?.destination.kind).toBe("absolute");
+    expect(routing.routeRules[0]?.redirect?.destination.template).toBe("/#pricing");
+  });
+
+  it("[RCFG-12] a fragment is still held to the destination rules: no control character, no second host, no /_dusk/ rewrite", () => {
+    expect(() => ok({ redirects: [{ source: "/a", destination: "/#a\nb" }] })).toThrow(
+      /control character/,
+    );
+    expect(() => ok({ redirects: [{ source: "/a", destination: "/#a\\b" }] })).toThrow(/backslash/);
+    expect(() => ok({ redirects: [{ source: "/a", destination: "//evil.example/#x" }] })).toThrow(
+      /"\/\/"/,
+    );
+    expect(() =>
+      ok({ redirects: [{ source: "/a", destination: "https://evil.example/#x" }] }),
+    ).toThrow(/trustedOrigins/);
+    // The path before the fragment is checked like any path: a parameter must be captured.
+    expect(() => ok({ redirects: [{ source: "/a", destination: "/:id#top" }] })).toThrow(
+      /redirects\[0\]\.destination/,
+    );
+  });
+
+  it("[RCFG-13] a rewrite destination has no fragment: the server never sees one", () => {
+    expect(() => ok({ rewrites: [{ source: "/a", destination: "/b#c" }] })).toThrow(
+      /rewrite.*fragment|fragment.*rewrite/,
+    );
+  });
+
   it("[RCFG-5] a destination may only use parameters the source captures", () => {
     expect(() => ok({ redirects: [{ source: "/posts/:id", destination: "/p/:slug" }] })).toThrow(
       /:slug/,

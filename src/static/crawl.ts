@@ -22,6 +22,8 @@ export interface PrerenderFailure {
   readonly error: unknown;
   /** True for a path the caller listed, false for a path the crawl found. */
   readonly explicit: boolean;
+  /** For a path the crawl found: the page whose link led to it (the first by path, when several linked to it). */
+  readonly from?: string;
 }
 
 /**
@@ -164,7 +166,7 @@ export interface CrawlRun {
    * Renders one path and resolves with the internal links of its page (the links are only read when
    * the crawl needs them). Rejects when the page did not render.
    */
-  readonly render: (path: string) => Promise<readonly string[]>;
+  readonly render: (path: string, from: string | undefined) => Promise<readonly string[]>;
   /** Called once per failed path, listed or found. */
   readonly onFailure?: ((failure: PrerenderFailure) => void | Promise<void>) | undefined;
 }
@@ -185,16 +187,31 @@ export async function runCrawl(run: CrawlRun): Promise<PrerenderFailure[]> {
   let level = [...new Set(run.paths)].filter(accepted).sort();
   for (const path of level) seen.add(path);
   let crawled = 0;
+  // The page a found path was linked from. Several pages may link to one path: the smallest path is named, so the
+  // answer does not depend on which page finished first.
+  const linkedFrom = new Map<string, string>();
   for (let depth = 0; level.length > 0; depth += 1) {
     const explicit = depth === 0;
     const crawling = run.crawl !== undefined && depth < run.crawl.depth;
     const found = new Set<string>();
     await pool(level, run.concurrency, async (path) => {
+      const from = linkedFrom.get(path);
       try {
-        const links = await run.render(path);
-        if (crawling) for (const link of links) found.add(link);
+        const links = await run.render(path, from);
+        if (crawling) {
+          for (const link of links) {
+            found.add(link);
+            const known = linkedFrom.get(link);
+            if (known === undefined || path < known) linkedFrom.set(link, path);
+          }
+        }
       } catch (error) {
-        const failure: PrerenderFailure = { path, error, explicit };
+        const failure: PrerenderFailure = {
+          path,
+          error,
+          explicit,
+          ...(from === undefined ? {} : { from }),
+        };
         if (explicit) failures.push(failure);
         await run.onFailure?.(failure);
       }

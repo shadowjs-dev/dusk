@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.1
+
+### Added
+
+- `dev.allowedHosts` in `dusk.config.ts` (`string[]` or `true`): host names `dusk dev` answers besides `localhost`. Vite's host check answered 403 to any other `Host`, for example `join.example.com` mapped to `127.0.0.1` while testing subdomain routing. The hosts the app declares in `security.allowedHosts` are allowed in development too (a port is dropped, `*.example.com` becomes `.example.com`). New: `DuskDevConfig`, `devAllowedHostsOf`.
+- `prerender.skipMissing` (`dusk.config.ts` and `dusk({ prerender })`): a listed path that matches no route is skipped with a warning instead of failing the build. `onError` of the prerender options gets `from`, the page a crawled path was linked from.
+- Guide: Serve a subdomain from a route (a middleware `rewrite()` serves `join.example.com/<code>` from `/join/<code>`, unknown paths go to the apex, with how to try it locally and on Vercel).
+
+### Fixed
+
+- A redirect in `dusk.config.ts` may end in a fragment (`/old-download` to `/#download`), for a path, for an absolute URL of a trusted origin and for `routeRules` redirects. The fragment is sent unchanged in `Location`, the request's query goes before it, and the static export's meta-refresh page keeps the query and the fragment of the target. A rewrite destination still may not have one.
+- A prerender that fails for a path that matches no route names the path, where it was listed (`prerender.routes`, `prerender.entries`, `routeRules`, the `prerender` export or function of a route file, or the page the link was found on) and the closest route.
+
 ## 1.0.0
 
 ### Added

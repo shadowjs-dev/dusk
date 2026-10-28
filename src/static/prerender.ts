@@ -312,7 +312,10 @@ export async function prerender(options: PrerenderOptions): Promise<PrerenderRes
       }
       const relative = outputFileFor(path, format, "text/html");
       claim(relative, path);
-      const file = await write(relative, redirectPage(`${target.pathname}${target.search}`));
+      const file = await write(
+        relative,
+        redirectPage(`${target.pathname}${target.search}${target.hash}`),
+      );
       const page: PrerenderedPage = { path, file, status: response.status, bytes: 0 };
       pages.push(page);
       await onSuccess?.(page);

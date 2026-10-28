@@ -6,6 +6,7 @@ import {
   bakeServerConfig,
   type DuskConfig,
   defineConfig,
+  devAllowedHostsOf,
   loadDuskConfigFile,
   mergeBuildOptions,
   validateDuskConfig,
@@ -88,7 +89,7 @@ describe("dusk.config.ts", () => {
     expect(() => options.env?.parse({})).toThrow(/DATABASE_URL/);
   });
 
-  it("[DCFG-15] secrets are never written in the config file: cookieSecrets is refused, and the message says where they go", () => {
+  it("[DCFG-23] secrets are never written in the config file: cookieSecrets is refused, and the message says where they go", () => {
     expect(() =>
       validateDuskConfig({ security: { cookieSecrets: ["0123456789abcdef0123456789abcdef"] } }),
     ).toThrow(/cookieSecrets.*secret.*server environment/);
@@ -207,6 +208,79 @@ describe("dusk.config.ts", () => {
     writeFileSync(join(dir, "dusk.config.mjs"), "export default 42;\n");
     await expect(loadDuskConfigFile(dir, "production", "build")).rejects.toThrow(
       /dusk\.config\.mjs.*object/,
+    );
+  });
+});
+
+describe("dusk.config.ts: dev.allowedHosts", () => {
+  it("[DCFG-23] dev takes allowedHosts as a list of host names or true; another key or shape is refused", () => {
+    expect(() => validateDuskConfig({ dev: { allowedHosts: ["join.example.com"] } })).not.toThrow();
+    expect(() => validateDuskConfig({ dev: { allowedHosts: true } })).not.toThrow();
+    expect(() => validateDuskConfig({ dev: {} })).not.toThrow();
+    expect(() => validateDuskConfig({ dev: { allowedHost: [] } })).toThrow(
+      /did you mean "allowedHosts"\?/,
+    );
+    expect(() => validateDuskConfig({ dev: { allowedHosts: false } })).toThrow(
+      /dev\.allowedHosts must be an array of host names, or true/,
+    );
+    expect(() => validateDuskConfig({ dev: { allowedHosts: ["a b"] } })).toThrow(
+      /dev\.allowedHosts\[0\]/,
+    );
+    expect(() => validateDuskConfig({ dev: { allowedHosts: [""] } })).toThrow(
+      /dev\.allowedHosts\[0\]/,
+    );
+    expect(() => validateDuskConfig({ dev: "localhost" })).toThrow(/dev must be an object/);
+  });
+
+  it("[DCFG-23] devAllowedHostsOf: nothing configured means nothing to add", () => {
+    expect(devAllowedHostsOf(undefined)).toBeUndefined();
+    expect(devAllowedHostsOf({})).toBeUndefined();
+    expect(devAllowedHostsOf({ security: { allowedHosts: [] } })).toBeUndefined();
+  });
+
+  it("[DCFG-23] devAllowedHostsOf: the listed hosts, and true for every host", () => {
+    expect(devAllowedHostsOf({ dev: { allowedHosts: ["join.notah.me"] } })).toEqual([
+      "join.notah.me",
+    ]);
+    expect(devAllowedHostsOf({ dev: { allowedHosts: true } })).toBe(true);
+    expect(
+      devAllowedHostsOf({ dev: { allowedHosts: true }, security: { allowedHosts: ["a.test"] } }),
+    ).toBe(true);
+  });
+
+  it("[DCFG-24] devAllowedHostsOf: the hosts the app declares for host routing are allowed in dev too, in Vite's spelling", () => {
+    const hosts = devAllowedHostsOf({
+      security: {
+        allowedHosts: ["notah.me", "join.notah.me:8443", "*.preview.notah.me", "NOTAH.me"],
+      },
+    });
+    // A port is dropped (Vite matches the host name only); `*.x` is `.x` (Vite's subdomain form); case folds; no duplicates.
+    expect(hosts).toEqual(["notah.me", "join.notah.me", ".preview.notah.me"]);
+  });
+
+  it("[DCFG-24] devAllowedHostsOf: dev.allowedHosts and the declared hosts add up without duplicates", () => {
+    expect(
+      devAllowedHostsOf({
+        dev: { allowedHosts: ["tunnel.example", "join.notah.me"] },
+        security: { allowedHosts: ["join.notah.me", "notah.me"] },
+      }),
+    ).toEqual(["tunnel.example", "join.notah.me", "notah.me"]);
+  });
+
+  it("[DCFG-25] dev is not part of the server bundle", () => {
+    const config = validateDuskConfig({ dev: { allowedHosts: ["join.notah.me"] } });
+    expect(JSON.stringify(bakeServerConfig(config))).not.toContain("join.notah.me");
+  });
+});
+
+describe("dusk.config.ts: prerender.skipMissing", () => {
+  it("[DCFG-27] prerender takes skipMissing as a boolean; another type is refused, a typo gets a suggestion", () => {
+    expect(() => validateDuskConfig({ prerender: { skipMissing: true } })).not.toThrow();
+    expect(() => validateDuskConfig({ prerender: { skipMissing: "yes" } })).toThrow(
+      /prerender\.skipMissing must be true or false/,
+    );
+    expect(() => validateDuskConfig({ prerender: { skipMising: true } })).toThrow(
+      /did you mean "skipMissing"\?/,
     );
   });
 });

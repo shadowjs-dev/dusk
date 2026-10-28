@@ -15,7 +15,10 @@ import {
 } from "../static/crawl";
 import { escapesFolder } from "./containment";
 import type { PrerenderOptions } from "./options";
+import { closestRoute, routeMatches } from "./prerender-routes";
 import type { ServerFnRecord } from "./project";
+
+export { closestRoute, routeMatches };
 
 /**
  * Production build helpers: the asset manifest computed from Vite's client manifest, and the
@@ -308,6 +311,11 @@ export interface PrerenderTarget {
   readonly path: string;
   /** Render the SPA shell (a route with `ssr = false`) instead of the page. */
   readonly shell: boolean;
+  /**
+   * Where the path was listed, for the messages about it: `prerender.routes`, `prerender.entries`, "the `prerender`
+   * export of <file>", "the `prerender` function of <file>", "the `ssr = false` route <file>".
+   */
+  readonly source?: string;
 }
 
 /**
@@ -342,7 +350,7 @@ const MAX_PATH = 1000;
 
 /** The fix every failed prerender run names. */
 const FIX =
-  "Fix the page, remove its path from prerender.routes or prerender.entries, skip it with prerender.filter, or set prerender.failOnError to false.";
+  "Fix the page, remove its path from prerender.routes or prerender.entries, skip it with prerender.filter, set prerender.skipMissing to true to skip a path that matches no route, or set prerender.failOnError to false.";
 
 /** A set of param values for a route pattern. */
 type ParamSet = Readonly<Record<string, string>>;
@@ -367,26 +375,43 @@ function isDynamic(pattern: string): boolean {
  * @since 1.0.0
  * @example prerenderTargets(scan, { routes: ["/extra"] }); // [{ path: "/about", shell: false }, ...]
  */
-export function prerenderTargets(scan: ScanResult, options: PrerenderOptions): PrerenderTarget[] {
+export function prerenderTargets(
+  scan: ScanResult,
+  options: PrerenderOptions,
+  routeSources: ReadonlyMap<string, string> = new Map(),
+): PrerenderTarget[] {
   const targets = new Map<string, PrerenderTarget>();
   for (const entry of scan.entries) {
     if (entry.kind !== "page") continue;
     const { prerender, ssr } = entry.info.config;
+    const exported = `the \`prerender\` export of ${entry.file}`;
     if (Array.isArray(prerender)) {
-      for (const path of prerender) targets.set(path, { path, shell: ssr === false });
+      for (const path of prerender) {
+        targets.set(path, { path, shell: ssr === false, source: exported });
+      }
     } else if (prerender === true) {
       if (isDynamic(entry.fullPath)) {
         throw new PrerenderError(
           `"${entry.file}" has prerender = true but its path "${entry.fullPath}" has params; export the list of paths instead (prerender = ["/posts/1", ...]), or a function that returns the params`,
         );
       }
-      targets.set(entry.fullPath, { path: entry.fullPath, shell: ssr === false });
+      targets.set(entry.fullPath, { path: entry.fullPath, shell: ssr === false, source: exported });
     } else if (ssr === false && !isDynamic(entry.fullPath)) {
-      targets.set(entry.fullPath, { path: entry.fullPath, shell: true });
+      targets.set(entry.fullPath, {
+        path: entry.fullPath,
+        shell: true,
+        source: `the \`ssr = false\` route ${entry.file}`,
+      });
     }
   }
   for (const path of options.routes ?? []) {
-    if (!targets.has(path)) targets.set(path, { path, shell: false });
+    if (!targets.has(path)) {
+      targets.set(path, {
+        path,
+        shell: false,
+        source: routeSources.get(path) ?? "prerender.routes",
+      });
+    }
   }
   return [...targets.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
@@ -460,9 +485,11 @@ export async function resolvePrerenderTargets(input: {
   readonly scan: ScanResult;
   readonly options: PrerenderOptions;
   readonly loaders: readonly PrerenderRouteLoader[];
+  /** Where paths of `options.routes` came from when it is not `prerender.routes` (path to text). */
+  readonly routeSources?: ReadonlyMap<string, string>;
 }): Promise<PrerenderTarget[]> {
   const targets = new Map<string, PrerenderTarget>();
-  for (const target of prerenderTargets(input.scan, input.options)) {
+  for (const target of prerenderTargets(input.scan, input.options, input.routeSources)) {
     targets.set(target.path, target);
   }
   const loaders = new Map(input.loaders.map((loader) => [loader.id, loader] as const));
@@ -498,7 +525,13 @@ export async function resolvePrerenderTargets(input: {
           `"${names}" is missing for route "${entry.id}" (file "${entry.file}"): its prerender function must return a value for "${names}"`,
         );
       }
-      if (!targets.has(path)) targets.set(path, { path, shell: entry.info.config.ssr === false });
+      if (!targets.has(path)) {
+        targets.set(path, {
+          path,
+          shell: entry.info.config.ssr === false,
+          source: `the \`prerender\` function of ${entry.file}`,
+        });
+      }
     }
   }
   const listed =
@@ -508,7 +541,7 @@ export async function resolvePrerenderTargets(input: {
         ? await input.options.entries()
         : input.options.entries;
   for (const path of listed) {
-    if (!targets.has(path)) targets.set(path, { path, shell: false });
+    if (!targets.has(path)) targets.set(path, { path, shell: false, source: "prerender.entries" });
   }
   return [...targets.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
@@ -645,7 +678,19 @@ export async function loadBuiltHandler(entryFile: string): Promise<RenderingHand
 /** What a page answered, once it is rendered. */
 type Rendered =
   | { readonly ok: true; readonly links: readonly string[] }
-  | { readonly ok: false; readonly retryable: boolean; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly retryable: boolean;
+      readonly message: string;
+      /** The path answered 404 and no route matches it (it was removed or renamed). */
+      readonly missing?: string;
+    };
+
+/** Where a path came from, for a message: `(listed in prerender.routes)` or `(linked from "/")`. */
+function originOf(source: string | undefined, from: string | undefined): string {
+  if (from !== undefined) return ` (linked from "${from}")`;
+  return source === undefined ? "" : ` (listed in ${source})`;
+}
 
 /**
  * Renders the targets with the built handler and writes the HTML next to the client assets. With
@@ -667,6 +712,15 @@ export async function prerenderPages(input: {
   readonly base: string;
   /** A handler already loaded from the entry (the build loads the server once). */
   readonly handler?: RenderingHandler | undefined;
+  /**
+   * The route patterns of the app (pages, API routes, streams). With them, a path that answers 404 and matches none
+   * is reported as a missing route, with the closest one; without them the answer is only "answered 404".
+   */
+  readonly routes?: readonly string[] | undefined;
+  /** The locales of the app, so `/ar/about` is known to belong to the route `/about`. */
+  readonly locales?: readonly string[] | undefined;
+  /** Told about a path `skipMissing` left out. */
+  readonly onWarn?: ((message: string) => void) | undefined;
 }): Promise<string[]> {
   if (input.targets.length === 0) return [];
   const handler = input.handler ?? (await loadBuiltHandler(input.entryFile));
@@ -682,8 +736,8 @@ export async function prerenderPages(input: {
   // Every listed path is checked before anything is rendered: an unsafe path fails the run at once.
   for (const target of input.targets) prerenderFile(input.clientDir, target.path);
 
-  const renderOnce = async (path: string): Promise<Rendered> => {
-    const target = byPath.get(path) ?? { path, shell: false };
+  const renderOnce = async (path: string, from: string | undefined): Promise<Rendered> => {
+    const target: PrerenderTarget = byPath.get(path) ?? { path, shell: false };
     const request = new Request(new URL(`${input.base}${path === "/" ? "" : path}` || "/", origin));
     let response: Response;
     try {
@@ -695,19 +749,29 @@ export async function prerenderPages(input: {
       return {
         ok: false,
         retryable: true,
-        message: `"${path}" failed to render: ${reasonOf(error)}`,
+        message: `"${path}" failed to render: ${reasonOf(error)}${originOf(target.source, from)}`,
       };
     }
     if (response.status !== 200) {
       await response.body?.cancel();
+      const where = originOf(target.source, from);
+      if (
+        response.status === 404 &&
+        input.routes !== undefined &&
+        !routeMatches(input.routes, path, input.locales)
+      ) {
+        const closest = closestRoute(input.routes, path);
+        const missing = `"${path}" matches no route${where}.${closest === undefined ? "" : ` Closest route: "${closest}".`}`;
+        return { ok: false, retryable: false, message: missing, missing };
+      }
       const why = response.status === 400 ? hostRejectionMessage(hosts, origin) : undefined;
       return {
         ok: false,
         retryable: response.status >= 500,
         message:
           why === undefined
-            ? `"${path}" answered ${response.status}`
-            : `"${path}" answered 400: ${why}`,
+            ? `"${path}" answered ${response.status}${where}`
+            : `"${path}" answered 400${where}: ${why}`,
       };
     }
     const type = response.headers.get("content-type") ?? "text/html";
@@ -723,12 +787,16 @@ export async function prerenderPages(input: {
     return { ok: true, links };
   };
 
-  const render = async (path: string): Promise<readonly string[]> => {
+  const render = async (path: string, from: string | undefined): Promise<readonly string[]> => {
     for (let attempt = 0; ; attempt += 1) {
-      const result = await renderOnce(path);
+      const result = await renderOnce(path, from);
       if (result.ok) {
         rendered.add(path);
         return result.links;
+      }
+      if (result.missing !== undefined && input.options.skipMissing === true) {
+        input.onWarn?.(`prerender skipped: ${result.missing}`);
+        return [];
       }
       if (!result.retryable || attempt >= retries) throw new PrerenderError(result.message);
     }
@@ -745,7 +813,12 @@ export async function prerenderPages(input: {
       onError === undefined
         ? undefined
         : async (failure) => {
-            await onError({ path: failure.path, error: failure.error, explicit: failure.explicit });
+            await onError({
+              path: failure.path,
+              error: failure.error,
+              explicit: failure.explicit,
+              ...(failure.from === undefined ? {} : { from: failure.from }),
+            });
           },
   });
   if (failures.length > 0 && failOnError) {

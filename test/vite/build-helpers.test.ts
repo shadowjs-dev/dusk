@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { internalLinks } from "../../src/static/crawl";
 import {
   buildIdOf,
+  closestRoute,
   computeAssets,
   createDuskManifest,
   PrerenderError,
@@ -15,6 +16,7 @@ import {
   prerenderPages,
   prerenderTargets,
   resolvePrerenderTargets,
+  routeMatches,
   type ViteManifest,
 } from "../../src/vite/build";
 
@@ -222,11 +224,11 @@ describe("prerender targets and output files", () => {
     );
     const targets = prerenderTargets(scan, { routes: ["/extra", "/about"] });
     expect(targets).toEqual([
-      { path: "/", shell: true },
-      { path: "/about", shell: false },
-      { path: "/docs/api", shell: false },
-      { path: "/docs/intro", shell: false },
-      { path: "/extra", shell: false },
+      { path: "/", shell: true, source: "the `ssr = false` route index.tsx" },
+      { path: "/about", shell: false, source: "the `prerender` export of about.tsx" },
+      { path: "/docs/api", shell: false, source: "the `prerender` export of docs/[slug].tsx" },
+      { path: "/docs/intro", shell: false, source: "the `prerender` export of docs/[slug].tsx" },
+      { path: "/extra", shell: false, source: "prerender.routes" },
     ]);
   });
 
@@ -734,5 +736,268 @@ export const handler = {
       base: "",
     });
     expect(four).toEqual(one);
+  });
+});
+
+describe("prerender: where a path came from, and the route it was meant to be", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A server whose handler answers 404 for the paths in `gone`, 500 for `/broken`, and links `/` to `/linked-gone`. */
+  function server(): { entryFile: string; clientDir: string } {
+    const dir = mkdtempSync(join(tmpdir(), "shadow-prerender-source-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, "server"));
+    const entryFile = join(dir, "server", "entry.mjs");
+    writeFileSync(
+      entryFile,
+      `const gone = new Set(["/old-pricing", "/aboot", "/linked-gone", "/posts/404"]);
+export const handler = { fetch: async (request) => {
+  const path = new URL(request.url).pathname;
+  if (path === "/broken") return new Response("no", { status: 500 });
+  if (gone.has(path)) return new Response("no", { status: 404 });
+  const body = path === "/" ? '<a href="/linked-gone">x</a><a href="/about">y</a>' : path;
+  return new Response("<html>" + body + "</html>", { headers: { "content-type": "text/html" } });
+} };`,
+    );
+    return { entryFile, clientDir: join(dir, "client") };
+  }
+
+  const ROUTES = ["/", "/about", "/pricing", "/posts/:id", "/docs/*", "/:lang/help"];
+
+  it("[SPRE-18] a target knows where it was listed: the config list, the entries, a route export", async () => {
+    const targets = prerenderTargets(
+      scanOf(
+        entry("/export", "export.tsx", { prerender: true }),
+        entry("/list", "list.tsx", { prerender: ["/list/a"] }),
+        entry("/shell", "shell.tsx", { ssr: false }),
+      ),
+      { routes: ["/extra"] },
+    );
+    const bySource = Object.fromEntries(targets.map((target) => [target.path, target.source]));
+    expect(bySource).toEqual({
+      "/export": "the `prerender` export of export.tsx",
+      "/extra": "prerender.routes",
+      "/list/a": "the `prerender` export of list.tsx",
+      "/shell": "the `ssr = false` route shell.tsx",
+    });
+    const resolved = await resolvePrerenderTargets({
+      scan: scanOf(entry("/posts/:id", "posts/[id].tsx", {})),
+      options: { entries: ["/from-entries"] },
+      loaders: [],
+    });
+    expect(resolved).toEqual([
+      { path: "/from-entries", shell: false, source: "prerender.entries" },
+    ]);
+  });
+
+  it("[SPRE-19] a route function names itself as the source of the paths it makes", async () => {
+    const page = entry("/posts/:id", "posts/[id].tsx", {});
+    const withExport: RouteEntry = {
+      ...page,
+      info: { ...page.info, exports: ["default", "prerender"] },
+    };
+    const targets = await resolvePrerenderTargets({
+      scan: scanOf(withExport),
+      options: {},
+      loaders: [{ id: "/posts/:id", load: async () => async () => [{ id: "7" }] }],
+    });
+    expect(targets).toEqual([
+      { path: "/posts/7", shell: false, source: "the `prerender` function of posts/[id].tsx" },
+    ]);
+  });
+
+  it("[SPRE-20] routeMatches: literals, params, splats and optional parts; a locale prefix is tried when it is a locale", () => {
+    expect(routeMatches(ROUTES, "/")).toBe(true);
+    expect(routeMatches(ROUTES, "/posts/9")).toBe(true);
+    expect(routeMatches(ROUTES, "/docs/a/b/c")).toBe(true);
+    expect(routeMatches(ROUTES, "/de/help")).toBe(true);
+    expect(routeMatches(ROUTES, "/old-pricing")).toBe(false);
+    expect(routeMatches(ROUTES, "/posts")).toBe(false);
+    expect(routeMatches(ROUTES, "/posts/9/extra")).toBe(false);
+    expect(routeMatches(["/blog/:slug?"], "/blog")).toBe(true);
+    expect(routeMatches(["/files/*?"], "/files")).toBe(true);
+    expect(routeMatches(["/about"], "/ar/about")).toBe(false);
+    expect(routeMatches(["/about"], "/ar/about", ["ar", "en"])).toBe(true);
+    expect(routeMatches(["/about"], "/fr/about", ["ar", "en"])).toBe(false);
+    expect(routeMatches(["/a/b"], "/a%2Fb")).toBe(false);
+  });
+
+  it("[SPRE-21] closestRoute: a typo or a rename finds its route; an unrelated path finds none", () => {
+    expect(closestRoute(ROUTES, "/aboot")).toBe("/about");
+    expect(closestRoute(ROUTES, "/old-pricing")).toBe("/pricing");
+    expect(closestRoute(ROUTES, "/pricng")).toBe("/pricing");
+    expect(closestRoute(ROUTES, "/post/5")).toBe("/posts/:id");
+    expect(closestRoute(ROUTES, "/zzzzzz")).toBeUndefined();
+    expect(closestRoute([], "/aboot")).toBeUndefined();
+    // The same input gives the same answer, whatever the order of the routes.
+    expect(closestRoute([...ROUTES].reverse(), "/aboot")).toBe("/about");
+  });
+
+  it("[SPRE-22] a listed path that matches no route fails with its path, where it was listed, and the closest route", async () => {
+    const { entryFile, clientDir } = server();
+    const error = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [
+        { path: "/old-pricing", shell: false, source: "prerender.routes" },
+        { path: "/about", shell: false, source: "prerender.entries" },
+      ],
+      options: {},
+      base: "",
+      routes: ROUTES,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PrerenderError);
+    const message = (error as Error).message;
+    expect(message).toContain('"/old-pricing" matches no route (listed in prerender.routes)');
+    expect(message).toContain('Closest route: "/pricing"');
+    expect(message).toContain("prerender.skipMissing");
+    expect(message).not.toContain('"/about"');
+  });
+
+  it("[SPRE-23] every missing path is reported at once, each with its own source", async () => {
+    const { entryFile, clientDir } = server();
+    const error = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [
+        { path: "/old-pricing", shell: false, source: "prerender.routes" },
+        { path: "/aboot", shell: false, source: "the `prerender` export of about.tsx" },
+      ],
+      options: {},
+      base: "",
+      routes: ROUTES,
+    }).catch((caught: unknown) => caught);
+    const message = (error as Error).message;
+    expect(message).toContain("2 pages failed to prerender");
+    expect(message).toContain(
+      '"/aboot" matches no route (listed in the `prerender` export of about.tsx)',
+    );
+    expect(message).toContain('"/old-pricing" matches no route (listed in prerender.routes)');
+  });
+
+  it("[SPRE-24] a missing path with no close route says so and still names its source", async () => {
+    const { entryFile, clientDir } = server();
+    const error = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [{ path: "/linked-gone", shell: false, source: "prerender.entries" }],
+      options: {},
+      base: "",
+      routes: ["/", "/pricing"],
+    }).catch((caught: unknown) => caught);
+    const message = (error as Error).message;
+    expect(message).toContain('"/linked-gone" matches no route (listed in prerender.entries)');
+    expect(message).not.toContain("Closest route");
+  });
+
+  it("[SPRE-25] a 404 for a path that a route does match keeps the plain message, with its source", async () => {
+    const { entryFile, clientDir } = server();
+    const error = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [{ path: "/posts/404", shell: false, source: "prerender.entries" }],
+      options: {},
+      base: "",
+      routes: ROUTES,
+    }).catch((caught: unknown) => caught);
+    const message = (error as Error).message;
+    expect(message).toContain('"/posts/404" answered 404 (listed in prerender.entries)');
+    expect(message).not.toContain('"/posts/404" matches no route');
+    // Without the routes the message is what it was.
+    const plain = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [{ path: "/old-pricing", shell: false }],
+      options: {},
+      base: "",
+    }).catch((caught: unknown) => caught);
+    expect((plain as Error).message).toContain('"/old-pricing" answered 404');
+  });
+
+  it("[SPRE-26] skipMissing warns for a path that matches no route and builds the rest; other failures still fail", async () => {
+    const { entryFile, clientDir } = server();
+    const warnings: string[] = [];
+    const done = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [
+        { path: "/old-pricing", shell: false, source: "prerender.routes" },
+        { path: "/about", shell: false, source: "prerender.routes" },
+      ],
+      options: { skipMissing: true },
+      base: "",
+      routes: ROUTES,
+      onWarn: (message) => warnings.push(message),
+    });
+    expect(done).toEqual(["/about"]);
+    expect(existsSync(join(clientDir, "old-pricing", "index.html"))).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('"/old-pricing" matches no route (listed in prerender.routes)');
+    expect(warnings[0]).toContain("skipped");
+    expect(warnings[0]).toContain('Closest route: "/pricing"');
+    const failing = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [
+        { path: "/broken", shell: false, source: "prerender.routes" },
+        { path: "/old-pricing", shell: false, source: "prerender.routes" },
+      ],
+      options: { skipMissing: true },
+      base: "",
+      routes: [...ROUTES, "/broken"],
+      onWarn: (message) => warnings.push(message),
+    }).catch((caught: unknown) => caught);
+    expect((failing as Error).message).toContain(
+      '"/broken" answered 500 (listed in prerender.routes)',
+    );
+    expect((failing as Error).message).not.toContain("old-pricing");
+  });
+
+  it("[SPRE-27] skipMissing off (the default) and failOnError false behave as before", async () => {
+    const { entryFile, clientDir } = server();
+    const done = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [
+        { path: "/old-pricing", shell: false, source: "prerender.routes" },
+        { path: "/about", shell: false },
+      ],
+      options: { failOnError: false },
+      base: "",
+      routes: ROUTES,
+    });
+    expect(done).toEqual(["/about"]);
+  });
+
+  it("[SPRE-28] a crawled link to a removed route is reported to onError with the page it was found on", async () => {
+    const { entryFile, clientDir } = server();
+    const seen: { path: string; from: string | undefined; explicit: boolean; text: string }[] = [];
+    const done = await prerenderPages({
+      entryFile,
+      clientDir,
+      targets: [{ path: "/", shell: false, source: "prerender.routes" }],
+      options: {
+        crawlLinks: true,
+        onError: (failure) => {
+          seen.push({
+            path: failure.path,
+            from: failure.from,
+            explicit: failure.explicit,
+            text: String(failure.error),
+          });
+        },
+      },
+      base: "",
+      routes: ROUTES,
+    });
+    expect(done).toEqual(["/", "/about"]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.path).toBe("/linked-gone");
+    expect(seen[0]?.from).toBe("/");
+    expect(seen[0]?.explicit).toBe(false);
+    expect(seen[0]?.text).toContain('"/linked-gone" matches no route (linked from "/")');
   });
 });

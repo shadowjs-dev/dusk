@@ -12,7 +12,12 @@ import {
   matchPattern,
   type PathParams,
 } from "../shared/path-pattern";
-import type { Condition, ResolvedRouting, RouteRule } from "../shared/routing-config";
+import {
+  type Condition,
+  type ResolvedRouting,
+  type RouteRule,
+  splitFragment,
+} from "../shared/routing-config";
 import { parseCookies } from "./cookies";
 import type { EventState } from "./event";
 
@@ -116,10 +121,12 @@ export function soundPath(path: string): string {
 /** Fills a template's path part; an absolute template is returned as it is. @internal */
 function fillTemplate(template: string, params: PathParams): string {
   if (!template.startsWith("/")) return template;
-  const queryAt = template.indexOf("?");
-  const path = queryAt === -1 ? template : template.slice(0, queryAt);
-  const query = queryAt === -1 ? "" : template.slice(queryAt);
-  return `${soundPath(fillPattern(path, params))}${query}`;
+  // The fragment is kept as written: it is not a path, so it holds no parameters.
+  const [beforeFragment, fragment] = splitFragment(template);
+  const queryAt = beforeFragment.indexOf("?");
+  const path = queryAt === -1 ? beforeFragment : beforeFragment.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : beforeFragment.slice(queryAt);
+  return `${soundPath(fillPattern(path, params))}${query}${fragment}`;
 }
 
 /**
@@ -154,9 +161,10 @@ export function redirectFor(
  * @internal
  */
 function withRequestQuery(template: string, params: PathParams, url: URL): string {
-  const target = fillTemplate(template, params);
-  if (target.includes("?") || url.search === "") return target;
-  return `${target}${url.search}`;
+  const [target, fragment] = splitFragment(fillTemplate(template, params));
+  // The query goes before the fragment, and a `?` inside the fragment is not a query of the destination.
+  if (target.includes("?") || url.search === "") return `${target}${fragment}`;
+  return `${target}${url.search}${fragment}`;
 }
 
 /**

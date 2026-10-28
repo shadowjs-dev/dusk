@@ -53,6 +53,7 @@ import { bundlerOptions, scanJsxOptions, transformSource } from "./compat";
 import {
   bakeServerConfig,
   type DuskBuildBudgets,
+  devAllowedHostsOf,
   imageWidthsOf,
   type LoadedDuskConfig,
   loadDuskConfigFile,
@@ -916,6 +917,9 @@ export function duskCore(
           scan,
           options: prerenderSettings,
           loaders: server?.prerenderRoutes ?? [],
+          routeSources: new Map(
+            routeRulePrerenders().map((path) => [path, "routeRules of dusk.config.ts"] as const),
+          ),
         });
         if (targets.length === 0) return [];
         return prerenderPages({
@@ -925,6 +929,17 @@ export function duskCore(
           options: prerenderSettings,
           base: mountBase(state.viteBase),
           handler: server?.handler,
+          // Every route that can answer a path, so a 404 for a path none of them matches is known to be a removed
+          // or renamed route, not a page that chose to answer 404.
+          routes: [
+            ...new Set([
+              ...scan.entries.filter((entry) => entry.kind === "page").map((e) => e.fullPath),
+              ...scan.api.map((entry) => entry.fullPath),
+              ...scan.streams.map((entry) => entry.fullPath),
+            ]),
+          ].sort(),
+          locales: state.file?.config.i18n?.locales,
+          onWarn: (message) => console.warn(message),
         });
       });
     }
@@ -995,12 +1010,17 @@ export function duskCore(
    * The prerender settings in force: the merged ones, with the literal paths of the route rules that set
    * `prerender: true` added to the routes to render.
    */
+  /** The paths that `routeRules` of `dusk.config.ts` ask to prerender, to name that file as their source. */
+  function routeRulePrerenders(): string[] {
+    return Object.entries(state.file?.config.routeRules ?? {})
+      .filter(([, rule]) => rule.prerender === true)
+      .map(([path]) => path);
+  }
+
   function prerenderOf(): false | PrerenderOptions {
     const base = opts().prerender;
     if (base === false) return false;
-    const fromRules = Object.entries(state.file?.config.routeRules ?? {})
-      .filter(([, rule]) => rule.prerender === true)
-      .map(([path]) => path);
+    const fromRules = routeRulePrerenders();
     return fromRules.length === 0
       ? base
       : { ...base, routes: [...(base.routes ?? []), ...fromRules] };
@@ -1123,8 +1143,12 @@ export function duskCore(
         ...clientImportMetaEnvDefines(state.envValues, state.prefixes, state.publicNames),
       };
       state.devProcessEnv = publicEnv.processEnv && env.command === "serve";
+      // Vite answers 403 to a Host it does not know; the app's own hosts and `dev.allowedHosts` are known to it in
+      // development. Vite merges this list with the one in the app's own server settings.
+      const devHosts = env.command === "serve" ? devAllowedHostsOf(state.file?.config) : undefined;
       return {
         appType: "custom",
+        ...(devHosts === undefined ? {} : { server: { allowedHosts: devHosts } }),
         envPrefix: [...state.prefixes],
         resolve: {
           dedupe: ["@shadow-js/core", "@shadow-js/web", "@shadow-js/router", "@shadow-js/dusk"],

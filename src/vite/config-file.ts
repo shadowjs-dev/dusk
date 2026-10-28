@@ -194,6 +194,20 @@ export interface DuskBuildConfig {
   readonly budgets?: DuskBuildBudgets;
 }
 
+/** Settings of `dusk dev` only; they never reach the server bundle. @since 1.0.0 */
+export interface DuskDevConfig {
+  /**
+   * Host names the dev server answers besides `localhost`. Vite refuses every other `Host` header with a 403, so a
+   * name mapped to `127.0.0.1` in `/etc/hosts` (to try host-based routing) or a tunnel needs to be listed here.
+   * Write a host name (`join.example.com`), a name with a port (the port is ignored), or `*.example.com` for the
+   * subdomains (also `.example.com`, Vite's spelling, which includes `example.com` itself). `true` accepts every
+   * host: use it only on a machine nobody else can reach, because a page that any host can read is open to DNS rebinding.
+   *
+   * The hosts the app declares in `security.allowedHosts` are always allowed in development; this list adds to them.
+   */
+  readonly allowedHosts?: readonly string[] | true;
+}
+
 /** The whole configuration. Every key is optional. @since 1.0.0 */
 export interface DuskConfig extends RoutingConfig {
   /** The platform the build emits for (build time). A `dusk({ adapter })` option wins. */
@@ -221,6 +235,8 @@ export interface DuskConfig extends RoutingConfig {
   readonly skew?: { readonly reload?: boolean };
   /** Build-time settings of the client output. */
   readonly build?: DuskBuildConfig;
+  /** Settings of `dusk dev` (not part of the server bundle). */
+  readonly dev?: DuskDevConfig;
 }
 
 /**
@@ -263,6 +279,7 @@ const TOP_KEYS = [
   "skew",
   "build",
   "buildId",
+  "dev",
 ] as const;
 const SECURITY_KEYS = [
   "allowedHosts",
@@ -282,6 +299,7 @@ const SECURITY_KEYS = [
   "methodNotAllowed",
   "defaultCacheControl",
 ] as const;
+const DEV_KEYS = ["allowedHosts"] as const;
 const LIMIT_KEYS = ["maxUrlLength", "maxBodyBytes", "requestTimeoutMs", "streamTimeoutMs"] as const;
 const RPC_KEYS = ["maxGetPayloadChars", "maxResponseBytes", "maxBatchSize"] as const;
 const CORS_KEYS = ["origins", "methods", "headers", "credentials", "maxAgeSeconds"] as const;
@@ -320,6 +338,7 @@ const PRERENDER_KEYS = [
   "origin",
   "concurrency",
   "failOnError",
+  "skipMissing",
 ] as const;
 const DRAFT_KEYS = ["secretEnv", "cookieName", "enablePath", "disablePath"] as const;
 const SKEW_KEYS = ["reload"] as const;
@@ -695,6 +714,12 @@ export function validateDuskConfig(raw: unknown): DuskConfig {
   if (raw["image"] !== undefined) validateImage(raw["image"]);
   if (raw["prerender"] !== undefined && raw["prerender"] !== false) {
     expectKeys("prerender", raw["prerender"], PRERENDER_KEYS);
+    for (const key of ["failOnError", "skipMissing"] as const) {
+      const flag = raw["prerender"][key];
+      if (flag !== undefined && typeof flag !== "boolean") {
+        throw new TypeError(`prerender.${key} must be true or false.`);
+      }
+    }
   }
   if (raw["cacheLife"] !== undefined) resolveCacheLife(raw["cacheLife"]);
   if (raw["draftMode"] !== undefined) {
@@ -751,6 +776,7 @@ export function validateDuskConfig(raw: unknown): DuskConfig {
     }
     if (raw["build"]["budgets"] !== undefined) validateBudgets(raw["build"]["budgets"]);
   }
+  if (raw["dev"] !== undefined) validateDev(raw["dev"]);
   const routing = Object.fromEntries(
     ROUTING_FIELDS.filter((key) => raw[key] !== undefined).map((key) => [key, raw[key]]),
   ) as RoutingConfig;
@@ -759,6 +785,22 @@ export function validateDuskConfig(raw: unknown): DuskConfig {
 }
 
 /** `build.budgets`: positive byte counts, with route paths as keys of `routes`. @internal */
+/** Validates `dev` (see {@link DuskDevConfig}). */
+function validateDev(value: unknown): void {
+  expectKeys("dev", value, DEV_KEYS);
+  const hosts = value["allowedHosts"];
+  if (hosts === undefined || hosts === true) return;
+  if (!Array.isArray(hosts)) {
+    throw new TypeError("dev.allowedHosts must be an array of host names, or true.");
+  }
+  stringList(
+    "dev.allowedHosts",
+    hosts,
+    (item) => item !== "" && item !== "*" && !/[\s/@]/.test(item),
+    "must be a host name such as join.example.com",
+  );
+}
+
 function validateBudgets(value: unknown): void {
   expectKeys("build.budgets", value, BUDGET_KEYS);
   if (!isRecord(value)) return;
@@ -845,6 +887,38 @@ export function imageWidthsOf(config: DuskConfig): ImageWidths | undefined {
     ...(device === undefined ? {} : { deviceSizes: [...device] }),
     ...(small === undefined ? {} : { imageSizes: [...small] }),
   };
+}
+
+/** One host pattern of Dusk (`host:port`, `*.host`) in the spelling of Vite's `server.allowedHosts`. */
+function viteHostPattern(pattern: string): string | undefined {
+  const lower = pattern.trim().toLowerCase();
+  // Vite lets every IP address through, and an IPv6 literal has colons that are not a port.
+  if (lower.startsWith("[")) return undefined;
+  const portAt = lower.lastIndexOf(":");
+  const name = portAt === -1 ? lower : lower.slice(0, portAt);
+  return name.startsWith("*.") ? name.slice(1) : name;
+}
+
+/**
+ * The hosts the dev server accepts in addition to `localhost`: `dev.allowedHosts` and the hosts the app declares in
+ * `security.allowedHosts` (they are the hosts it serves, so they work in development too), written the way Vite's
+ * `server.allowedHosts` reads them. Without either, `undefined`: Vite keeps its own default.
+ *
+ * @param config A validated configuration (or undefined without a file).
+ * @returns `true` for every host, a list of host patterns, or `undefined`.
+ * @example
+ * devAllowedHostsOf({ security: { allowedHosts: ["*.example.com:8443"] } }); // [".example.com"]
+ * @since 1.0.0
+ */
+export function devAllowedHostsOf(config: DuskConfig | undefined): true | string[] | undefined {
+  const dev = config?.dev?.allowedHosts;
+  if (dev === true) return true;
+  const hosts: string[] = [];
+  for (const pattern of [...(dev ?? []), ...(config?.security?.allowedHosts ?? [])]) {
+    const host = viteHostPattern(pattern);
+    if (host !== undefined && !hosts.includes(host)) hosts.push(host);
+  }
+  return hosts.length === 0 ? undefined : hosts;
 }
 
 /**

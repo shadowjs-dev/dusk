@@ -22,6 +22,8 @@ export interface Scenario extends ScenarioRequest {
   readonly status: number;
   /** A substring the body must contain, if any. */
   readonly contains?: string;
+  /** The exact `location` header the baseline answers, if any. */
+  readonly location?: string;
   /**
    * A file of the client build. Served by the runtime, not the handler: only targets that serve
    * static files are compared on it (the baseline is the file itself).
@@ -117,6 +119,31 @@ export function scenariosFor(shoutId: string): readonly Scenario[] {
       headers: IDENTITY,
     },
     { id: "redirect", method: "GET", path: "/api/old", status: 301, headers: IDENTITY },
+    // Redirects of dusk.config.ts with a fragment: the browser keeps it from the Location header.
+    {
+      id: "config-redirect-fragment",
+      method: "GET",
+      path: "/old-download",
+      status: 307,
+      location: "/#download",
+      headers: IDENTITY,
+    },
+    {
+      id: "config-redirect-fragment-query",
+      method: "GET",
+      path: "/old-download?ref=mail",
+      status: 307,
+      location: "/?ref=mail#download",
+      headers: IDENTITY,
+    },
+    {
+      id: "config-redirect-fragment-absolute",
+      method: "GET",
+      path: "/docs-link",
+      status: 308,
+      location: "https://docs.example/start#install",
+      headers: IDENTITY,
+    },
     { id: "not-found", method: "GET", path: "/no/such/page", status: 404, headers: IDENTITY },
     {
       id: "static-asset",

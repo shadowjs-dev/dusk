@@ -6,6 +6,7 @@ import {
   headersFor,
   redirectFor,
   rewriteFor,
+  routeRedirectFor,
 } from "../../src/server/routing";
 import {
   type ResolvedRouting,
@@ -42,6 +43,36 @@ describe("runtime routing", () => {
     });
     const none = req("/elsewhere");
     expect(redirectFor(table, "/elsewhere", none.request, none.url)).toBeUndefined();
+  });
+
+  it("[ROUTE-18] a redirect with a fragment sends it unchanged, and the request's query goes before it", () => {
+    const table = routing({
+      redirects: [
+        { source: "/old-download", destination: "/#download" },
+        { source: "/old/:id", destination: "/new/:id#top" },
+        { source: "/own", destination: "/page?from=rule#x" },
+        { source: "/away", destination: "https://partner.example/start#top" },
+        { source: "/frag", destination: "/page#a?b" },
+      ],
+    });
+    const answer = (path: string, search = ""): unknown => {
+      const { request, url } = req(`${path}${search}`);
+      return redirectFor(table, path, request, url)?.target;
+    };
+    expect(answer("/old-download")).toBe("/#download");
+    expect(answer("/old-download", "?ref=mail")).toBe("/?ref=mail#download");
+    expect(answer("/old/7", "?a=1")).toBe("/new/7?a=1#top");
+    // A destination with a query of its own keeps it; the request's query is dropped, as without a fragment.
+    expect(answer("/own", "?a=1")).toBe("/page?from=rule#x");
+    expect(answer("/away", "?a=1")).toBe("https://partner.example/start?a=1#top");
+    // A `?` after the `#` is part of the fragment, not a query.
+    expect(answer("/frag", "?a=1")).toBe("/page?a=1#a?b");
+  });
+
+  it("[ROUTE-18] a route rule redirect with a fragment is filled the same way", () => {
+    const table = routing({ routeRules: { "/rule": { redirect: { to: "/#pricing" } } } });
+    const { request, url } = req("/rule?x=1");
+    expect(routeRedirectFor(table, "/rule", request, url)?.target).toBe("/?x=1#pricing");
   });
 
   it("[ROUTE-2] `has` and `missing` conditions: a header value, a cookie presence, a query value, the host", () => {

@@ -2,7 +2,9 @@
  * Cross-origin access to API routes (`security.cors`). Only the listed origins are answered; an origin
  * that is not listed gets no `Access-Control-*` header, so the browser refuses to read the response. The
  * rule is per origin and explicit: there is no `*`, and credentials are only allowed for listed origins.
- * Server functions are not covered: they are same-origin and protected by CSRF checks.
+ * A listed origin is also trusted by the CSRF check of API routes for the methods the rule allows, so a request that
+ * passed its preflight is not refused afterward. Server functions are not covered: they are same-origin and protected
+ * by CSRF checks.
  *
  * @packageDocumentation
  */

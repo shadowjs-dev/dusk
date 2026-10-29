@@ -1,6 +1,6 @@
 import { createRateLimiter } from "../server/rate-limit";
 import { OidcError } from "./errors";
-import { checkEndpointUrl, type FetchPolicy, fetchBounded, parseJsonObject } from "./http";
+import { checkEndpointUrl, type FetchPolicy, fetchBounded, parseJsonObject, waitFor } from "./http";
 import { importVerificationKey, type Jwk, type JwtHeader, keyTypeOf } from "./jwt";
 
 /** Options of {@link createJwksCache}. @since 1.0.0 */
@@ -97,10 +97,11 @@ export function createJwksCache(options: JwksCacheOptions): JwksCache {
   };
 
   const load = (policy: FetchPolicy): Promise<Snapshot> => {
-    inflight ??= fetchSet(policy).finally(() => {
+    // The fetch is shared, so it ends by its own timeout only; each caller stops waiting on its own signal.
+    inflight ??= fetchSet({ ...policy, signal: undefined }).finally(() => {
       inflight = undefined;
     });
-    return inflight;
+    return waitFor(inflight, policy.signal);
   };
 
   const select = (set: Snapshot, header: JwtHeader): Array<readonly [number, Jwk]> => {

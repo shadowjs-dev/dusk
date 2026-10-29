@@ -19,6 +19,30 @@ export interface BoundedResponse {
   readonly text: string;
 }
 
+/**
+ * Waits for a promise other callers share without tying it to this caller: when `signal` aborts, only this wait ends (with
+ * the signal's reason), the shared work goes on for the others.
+ * @internal
+ */
+export function waitFor<T>(shared: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return shared;
+  return new Promise<T>((resolve, reject) => {
+    const stop = (): void => reject(signal.reason);
+    signal.addEventListener("abort", stop, { once: true });
+    if (signal.aborted) stop();
+    shared.then(
+      (value) => {
+        signal.removeEventListener("abort", stop);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", stop);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** True for a host name that only this machine can reach. @internal */
 export function isLoopbackHost(hostname: string): boolean {
   return (

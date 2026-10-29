@@ -1,5 +1,10 @@
 import { hashKey } from "@shadow-js/query";
-import { canonicalizePathname } from "@shadow-js/router/core";
+import {
+  canonicalizePathname,
+  type PatternSegment,
+  parsePattern,
+  type RouteMatch,
+} from "@shadow-js/router/core";
 import type { RouteRule } from "../shared/routing-config";
 import { markProcessLocalStore } from "../shared/worker-info";
 import { type CacheEntry, type CacheStore, createMemoryCacheStore } from "./cache-store";
@@ -77,6 +82,11 @@ export interface ResolvedCache {
   readonly base: string;
   /** The router's `caseSensitive`: whether `/About` and `/about` are two pages (and so two entries). */
   readonly caseSensitive: boolean;
+  /**
+   * The matched route chain of a full pathname (with the base). The key folds the case of the static segments the router
+   * ignores and keeps the case of the values of params, which two pages can differ by. Absent: the whole path folds.
+   */
+  readonly chainOf?: (pathname: string) => readonly RouteMatch[];
 }
 
 /** What the matched page chain asks of the cache. @internal */
@@ -299,9 +309,44 @@ export function cacheableRequest(request: Request, policy: CachePolicy): boolean
  * with the same page, so they must be one cache entry, and `revalidatePath` must reach it whichever spelling filled it.
  * @internal
  */
-export function canonicalPath(pathname: string, caseSensitive: boolean): string {
+export function canonicalPath(
+  pathname: string,
+  caseSensitive: boolean,
+  chainOf?: ResolvedCache["chainOf"],
+  base = "",
+): string {
   const canonical = canonicalizePathname(pathname, "preserve") ?? pathname;
-  return caseSensitive ? canonical : canonical.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+  if (caseSensitive) return canonical;
+  const chain = chainOf?.(pathname) ?? [];
+  return chain.length === 0 ? fold(canonical) : foldStatic(canonical, base, chain);
+}
+
+const STATIC: PatternSegment = { kind: "static", text: "", canonical: "" };
+
+const fold = (text: string): string => text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+
+/**
+ * Folds the case of the base and of the static segments of the matched routes. A param keeps the case of its value (and a
+ * splat of its rest): `/p/AbC` and `/p/abc` are two pages, not one.
+ */
+function foldStatic(canonical: string, base: string, chain: readonly RouteMatch[]): string {
+  const parts = canonical.split("/");
+  const params = chain[chain.length - 1]?.params ?? {};
+  // The segments the path is made of, in order. The mount point is matched without case, like a static segment.
+  const segments: PatternSegment[] = [
+    ...base.split("/").flatMap((piece): PatternSegment[] => (piece === "" ? [] : [STATIC])),
+    ...chain.flatMap(({ pattern }) =>
+      pattern === "" || pattern === "/" ? [] : parsePattern(pattern).segments,
+    ),
+  ];
+  let at = 1;
+  for (const segment of segments) {
+    if (at >= parts.length || segment.kind === "splat") break;
+    if (segment.kind === "static") parts[at] = fold(parts[at] ?? "");
+    else if (segment.kind === "optional" && params[segment.name] === undefined) continue;
+    at += 1;
+  }
+  return parts.join("/");
 }
 
 /**
@@ -316,6 +361,7 @@ export function keyOf(
   request: Request,
   policy: CachePolicy,
   caseSensitive = false,
+  pathKey: (pathname: string) => string = (pathname) => canonicalPath(pathname, caseSensitive),
 ): string {
   const pairs: [string, string][] = [];
   for (const [name, value] of url.searchParams) {
@@ -328,7 +374,7 @@ export function keyOf(
   );
   const jar = parseCookies(request.headers.get("cookie"));
   const cookies = policy.cookies.map((name): [string, string] => [name, jar.get(name) ?? ""]);
-  return hashKey([url.host, canonicalPath(url.pathname, caseSensitive), pairs, cookies]);
+  return hashKey([url.host, pathKey(url.pathname), pairs, cookies]);
 }
 
 /**
@@ -383,11 +429,17 @@ export function watchHeaders(request: Request, seen: Set<string>): Request {
   });
 }
 
-/** The app path of a URL: the pathname without the mount base, canonical, with no trailing slash. */
-function appPathOf(pathname: string, base: string, caseSensitive: boolean): string {
-  const inner = base !== "" && pathname.startsWith(base) ? pathname.slice(base.length) : pathname;
-  const trimmed = inner.length > 1 && inner.endsWith("/") ? inner.slice(0, -1) : inner;
-  return canonicalPath(trimmed === "" ? "/" : trimmed, caseSensitive);
+/**
+ * The app path of a full pathname (with the mount base): below the base, canonical, with no trailing slash, folded as
+ * the key is.
+ */
+function appPathOf(pathname: string, config: ResolvedCache): string {
+  const { base, caseSensitive, chainOf } = config;
+  const trimmed = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  const full = canonicalPath(trimmed, caseSensitive, chainOf, base);
+  const prefix = base === "" ? "" : canonicalPath(base, caseSensitive);
+  const inner = full.startsWith(prefix) ? full.slice(prefix.length) : full;
+  return inner === "" ? "/" : inner;
 }
 
 /** Strong validator of a body. */
@@ -503,6 +555,8 @@ export function createIsr(config: ResolvedCache, deps: IsrDeps): Isr {
     maxKeys: config.maxInFlight,
   });
   const guard = createPurgeGuard();
+  const pathKey = (pathname: string): string =>
+    canonicalPath(pathname, config.caseSensitive, config.chainOf, config.base);
   /** Pages already warned about, so a busy page does not repeat the message (bounded). */
   const warned = new Set<string>();
   const warnUnkeyed = (path: string, names: readonly string[]): void => {
@@ -670,10 +724,7 @@ export function createIsr(config: ResolvedCache, deps: IsrDeps): Isr {
       else kept[index] = ["vary", varyValue];
     }
     const storedAt = startedAt;
-    const tags = [
-      `path:${appPathOf(request.url.pathname, config.base, config.caseSensitive)}`,
-      ...(tagsOf.get(event) ?? []),
-    ];
+    const tags = [`path:${appPathOf(request.url.pathname, config)}`, ...(tagsOf.get(event) ?? [])];
     const entry: CacheEntry = {
       status: 200,
       headers: kept,
@@ -689,7 +740,7 @@ export function createIsr(config: ResolvedCache, deps: IsrDeps): Isr {
     // answers the requests that waited for it and is not kept.
     if (guard.touched(mark, entry.tags)) return { kind: "entry", entry };
     // The entry is stored under the key of its own variant (its Vary values), and the base key indexes the names.
-    const base = keyOf(request.url, request.request, policy, config.caseSensitive);
+    const base = keyOf(request.url, request.request, policy, config.caseSensitive, pathKey);
     if (vary.names.length > 0) {
       await storeSafely(base, {
         status: 200,
@@ -720,7 +771,7 @@ export function createIsr(config: ResolvedCache, deps: IsrDeps): Isr {
         const response = await deps.renderOwn(event);
         return withHeaders(response, { "x-dusk-cache": "BYPASS" });
       }
-      const base = keyOf(event.url, event.request, policy, config.caseSensitive);
+      const base = keyOf(event.url, event.request, policy, config.caseSensitive, pathKey);
       const first = await store.get(base).catch((error: unknown) => {
         deps.report(error);
         return undefined;
@@ -792,7 +843,7 @@ export function createIsr(config: ResolvedCache, deps: IsrDeps): Isr {
       }
     },
     async purgePath(path: string): Promise<void> {
-      await isr.purgeTag(`path:${appPathOf(path, "", config.caseSensitive)}`);
+      await isr.purgeTag(`path:${appPathOf(`${config.base}${path}`, config)}`);
     },
   };
   return isr;

@@ -339,6 +339,13 @@ A production build keeps a short code instead of the development explanation, so
 | `DUSK_ISLAND_2` | The props of an island are not a JSON object, or are not valid JSON. |
 | `DUSK_ISLAND_3` | island "…" is not in the registry |
 | `DUSK_MAXBYTES` | readTextLimited: maxBytes must be a number of at least 0. |
+| `DUSK_META_1` | headers of route "…": "…" is not a valid header (the code is followed by the route id). |
+| `DUSK_META_2` | route "…" exports both metadata and generateMetadata; export one of them (the code is followed by the route id). |
+| `DUSK_META_3` | route "…" exports both viewport and generateViewport; export one of them (the code is followed by the route id). |
+| `DUSK_META_4` | headers: a route cannot set "…" (the code is followed by the header name). |
+| `DUSK_META_5` | metadataBase must be an absolute http(s) URL. |
+| `DUSK_META_6` | jsonLd: a JSON-LD value must be an object or an array. |
+| `DUSK_META_7` | jsonLd: a block may be at most … characters. |
 | `DUSK_METHOD` | security.methodNotAllowed must be "json" or "empty". |
 | `DUSK_OPTION` | … must be an object. |
 | `DUSK_PORT` | serve: port must be an integer from 0 to 65535 (got …) |

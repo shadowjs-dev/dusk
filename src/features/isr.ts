@@ -44,6 +44,7 @@ export function isr(): DuskFeature {
         ...resolveCache(options.cache),
         base: config.base,
         caseSensitive: config.manifest.caseSensitive === true,
+        chainOf: (pathname: string) => pages.runtime.pageMatcher.match(pathname, "all"),
       };
       /** Renders a page for a URL with an event of its own (a miss or a background refresh has no request). */
       const renderForCache = async (

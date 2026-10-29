@@ -1,4 +1,9 @@
-import { createMatcher, enableRedirectTargets, type RouteMatch } from "@shadow-js/router/core";
+import {
+  canonicalizePathname,
+  createMatcher,
+  enableRedirectTargets,
+  type RouteMatch,
+} from "@shadow-js/router/core";
 import { randomNonce } from "../internal/encoding";
 import { HttpError } from "../internal/http-error";
 import { assertKnownOptions } from "../internal/known-options";
@@ -468,6 +473,18 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     return parsedEnv.all;
   };
 
+  /**
+   * A path target is an app path: the mount base goes in front of it and the trailing-slash policy shapes it, as the
+   * router does for a page redirect. Anything else (an absolute URL, a relative reference) is unchanged.
+   */
+  const withBase = (target: string): string => {
+    if (config.base === "" || !target.startsWith("/")) return target;
+    // No query or fragment: `-1 >>> 0` is past the end, so the path is the whole target and the rest is empty.
+    const cut = target.search(/[?#]/) >>> 0;
+    const path = `${config.base}${target.slice(0, cut)}`;
+    return `${canonicalizePathname(path, config.trailingSlash) ?? path}${target.slice(cut)}`;
+  };
+
   /** Maps anything thrown to a response: redirect, JSON error or HTML error page. */
   const failureResponse = (event: EventState, thrown: unknown): Response => {
     if (event.route.kind === "rpc" && capabilities.rpc !== undefined) {
@@ -476,7 +493,9 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     let error = thrown;
     if (isRedirect(thrown)) {
       const target = checkRedirectTarget(thrown.to, runtime.policyFor(event));
-      if (typeof target === "string") return redirectResponse(target, redirectStatus(thrown));
+      if (typeof target === "string") {
+        return redirectResponse(withBase(target), redirectStatus(thrown));
+      }
       error = target;
     }
     const description = describeError(error, event.dev);
@@ -760,13 +779,19 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     if (resolution.kind !== "rpc") refuseDeclaredLength(event.request.headers, event.bodyCap.limit);
     // CORS for listed origins (`security.cors`): a preflight is answered here, before the route runs.
     // The runtime loads only for a handler that sets `security.cors` (see `cors-headers.ts`).
+    // An origin the rule lists, for a method it allows, is trusted by the CSRF check below: the preflight just agreed to
+    // the request, and the check would refuse it.
+    let trusted: ReadonlySet<string> = config.csrf.trusted;
     if (resolution.kind === "api" && config.cors !== undefined) {
       const { corsHeadersFor } = await import("./cors-headers");
       const preflight =
         event.method === "OPTIONS" && event.request.headers.has("access-control-request-method");
-      const cors = corsHeadersFor(config.cors, event.request.headers.get("origin"), preflight);
+      const origin = event.request.headers.get("origin");
+      const cors = corsHeadersFor(config.cors, origin, preflight);
       if (cors !== undefined) {
         if (preflight) return new Response(null, { status: 204, headers: cors });
+        if (origin !== null && config.cors.methods.split(", ").includes(event.method))
+          trusted = new Set([...trusted, origin]);
         for (const [name, value] of Object.entries(cors)) {
           if (name !== "vary") event.responseHeaders.set(name, value);
         }
@@ -776,7 +801,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     if (config.csrf.enabled && csrfApplies) {
       const decision = checkCsrf(event.request, {
         origin: event.url.origin,
-        trustedOrigins: config.csrf.trusted,
+        trustedOrigins: trusted,
         allowMissingOrigin: config.csrf.allowMissingOrigin,
       });
       if (!decision.ok) {

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.3
+
+### Fixed
+
+- The metadata errors (`headers` of a route, `metadata` with `generateMetadata`, `viewport` with `generateViewport`, a header a route cannot set, `metadataBase`, `jsonLd`) carry production codes `DUSK_META_1` to `DUSK_META_7` instead of their development text, so the message text no longer reaches the client bundle (about 150 bytes gzip on every page of a Dusk app with head metadata).
+- The ISR cache key keeps the case of param and splat values (`/p/AbC` and `/p/abc` are two entries) and folds only the base and the static segments, and `revalidatePath` reaches the entry of the exact spelling.
+- The shared OIDC discovery and key set fetches run with their own timeout only: a caller that disconnects no longer fails the others waiting or starts the retry delay; each caller stops waiting on its own signal.
+- A redirect thrown from an API route or global middleware puts the mount `base` in front of a path target, as a page redirect does (absolute URLs are unchanged).
+- The loader data a single-flight server function sends back is computed with the cookies after the mutation (the ones it set and deleted), not the `Cookie` header the browser sent.
+- A POST (or other allowed method) from an origin listed in `security.cors.origins` to an API route is trusted by the CSRF check, so a request that passed its preflight is no longer refused with 403.
+- The static file server answers a 304 to the `ETag` of the gzip copy it compresses on the fly (and still to the identity one).
+- Vercel and Netlify route a handler-mode prerendered page's own file URLs (`/admin/index.html`, `/admin.html`, `/index.html`) to the function, so its middleware and rules run.
+- `<Script>` with inline children and no `id` is marked with `data-dusk-script` on the server, and the browser adopts it instead of running it a second time.
+
 ## 1.0.2
 
 ### Fixed

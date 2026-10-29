@@ -1,6 +1,7 @@
 import { createComponent, renderToString } from "@shadow-js/web/server";
 import { describe, expect, it } from "vitest";
 import { createHandler, type DuskRuntimeManifest } from "../../src/server/index";
+import { inlineScriptKey } from "../../src/shared/script";
 import { errorLog, manifestOf } from "../support/app";
 import { load } from "../support/compile";
 import { allFeatures } from "../support/features";
@@ -101,5 +102,17 @@ describe("<Script> de-duplication on a page", () => {
     expect(html.match(/src="\/widget-a\.js"/g)).toHaveLength(1);
     expect(html).not.toContain("/widget-b.js");
     expect(log.errors).toHaveLength(0);
+  });
+});
+
+describe("<Script> inline code is marked for the browser", () => {
+  it("[DUSK-R7-8] an inline script with no id carries the key of its text; one with an id carries its id only", async () => {
+    const mod = await loadComponent<Module>("ssr", "script");
+    const text = "window.ready = true;";
+    const anonymous = markup(mod, { children: text });
+    expect(anonymous).toContain(`data-dusk-script="${inlineScriptKey(text)}"`);
+    expect(anonymous).toContain(text);
+    expect(markup(mod, { children: text, id: "boot" })).not.toContain("data-dusk-script");
+    expect(markup(mod, { src: "/a.js" })).not.toContain("data-dusk-script");
   });
 });

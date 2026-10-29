@@ -5,7 +5,7 @@ description: "Work with @shadow-js/dusk. A full-stack framework with file routes
 
 # @shadow-js/dusk
 
-Version 1.0.2. A full-stack framework with file routes, loaders, server functions and secure request handling.
+Version 1.0.3. A full-stack framework with file routes, loaders, server functions and secure request handling.
 
 ## Where to read more
 
@@ -24,10 +24,10 @@ npm install @shadow-js/dusk @shadow-js/core @shadow-js/router @shadow-js/web
 | Package | Range | Required |
 | --- | --- | --- |
 | `@resvg/resvg-wasm` | `^2.6.2` | no |
-| `@shadow-js/core` | `^1.0.2` | yes |
-| `@shadow-js/i18n` | `^1.0.2` | no |
-| `@shadow-js/router` | `^1.0.2` | yes |
-| `@shadow-js/web` | `^1.0.2` | yes |
+| `@shadow-js/core` | `^1.0.3` | yes |
+| `@shadow-js/i18n` | `^1.0.3` | no |
+| `@shadow-js/router` | `^1.0.3` | yes |
+| `@shadow-js/web` | `^1.0.3` | yes |
 | `satori` | `^0.43.0` | no |
 | `sharp` | `^0.35.5` | no |
 | `subset-font` | `^2.9.0` | no |

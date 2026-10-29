@@ -244,8 +244,16 @@ export async function revalidatedFor(
   const url = new URL(raw, event.url.origin);
   // "/\\host" is read as "//host" by the URL parser: a location of another origin gets no loader run.
   if (url.origin !== event.url.origin) return undefined;
+  // The cookies are the jar's after the mutation (what it set and deleted), not the header the browser sent: the browser
+  // holds them once this answer arrives, and the page it shows must be the page it would load then.
+  const headers = new Headers(event.request.headers);
+  const cookie = [...event.cookies.getAll()]
+    .map(([name, value]) => `${name}=${encodeURIComponent(value)}`)
+    .join("; ");
+  if (cookie === "") headers.delete("cookie");
+  else headers.set("cookie", cookie);
   const page = new EventState({
-    request: new Request(url, { headers: event.request.headers }),
+    request: new Request(url, { headers }),
     url,
     signal: event.signal,
     id: event.id,

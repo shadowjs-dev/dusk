@@ -123,7 +123,9 @@ export function checkedHeaders(
   for (const [name, value] of Object.entries(input)) {
     if (!HEADER_NAME.test(name) || typeof value !== "string" || !HEADER_VALUE.test(value)) {
       throw new TypeError(
-        `headers of route "${routeId}": ${JSON.stringify(name)} is not a valid header.`,
+        __DEV__
+          ? `headers of route "${routeId}": ${JSON.stringify(name)} is not a valid header.`
+          : `DUSK_META_1 ${routeId}`,
       );
     }
     out[name.toLowerCase()] = value;
@@ -227,7 +229,9 @@ function stepsOf(route: ChainRoute, context: ChainContext, onError: ChainErrorHa
     if (route.metadata !== undefined && route.generateMetadata !== undefined) {
       onError(
         new TypeError(
-          `route "${route.id}" exports both metadata and generateMetadata; export one of them.`,
+          __DEV__
+            ? `route "${route.id}" exports both metadata and generateMetadata; export one of them.`
+            : `DUSK_META_2 ${route.id}`,
         ),
         route.id,
       );
@@ -248,7 +252,9 @@ function stepsOf(route: ChainRoute, context: ChainContext, onError: ChainErrorHa
     if (route.viewport !== undefined && route.generateViewport !== undefined) {
       onError(
         new TypeError(
-          `route "${route.id}" exports both viewport and generateViewport; export one of them.`,
+          __DEV__
+            ? `route "${route.id}" exports both viewport and generateViewport; export one of them.`
+            : `DUSK_META_3 ${route.id}`,
         ),
         route.id,
       );

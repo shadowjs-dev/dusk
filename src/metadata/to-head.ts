@@ -78,14 +78,18 @@ function link(props: Props): HeadTag {
 export function jsonLdText(value: unknown): string {
   const json = JSON.stringify(value);
   if (json === undefined || typeof value !== "object" || value === null) {
-    throw new TypeError("jsonLd: a JSON-LD value must be an object or an array.");
+    throw new TypeError(
+      __DEV__ ? "jsonLd: a JSON-LD value must be an object or an array." : "DUSK_META_6",
+    );
   }
   const text = json.replace(
     /[<>&\u2028\u2029]/g,
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
   );
   if (text.length > MAX_JSON_LD_LENGTH) {
-    throw new RangeError(`jsonLd: a block may be at most ${MAX_JSON_LD_LENGTH} characters.`);
+    throw new RangeError(
+      __DEV__ ? `jsonLd: a block may be at most ${MAX_JSON_LD_LENGTH} characters.` : "DUSK_META_7",
+    );
   }
   return text;
 }

@@ -42,7 +42,9 @@ function applyChainHeaders(
 ): void {
   for (const [name, value] of Object.entries(chain.headers)) {
     if (ROUTE_HEADER_DENYLIST.has(name)) {
-      report(new TypeError(`headers: a route cannot set "${name}".`));
+      report(
+        new TypeError(__DEV__ ? `headers: a route cannot set "${name}".` : `DUSK_META_4 ${name}`),
+      );
       continue;
     }
     headers.set(name, value);

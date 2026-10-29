@@ -427,15 +427,31 @@ export function createStaticServer(options: StaticOptions): StaticServer {
     if (compressible(type)) headers["vary"] = "Accept-Encoding";
     if (source.encoding !== undefined) headers["content-encoding"] = source.encoding;
 
+    // A file with no precompressed copy is compressed on the fly when it is big enough: that copy has a tag of its own, and
+    // a client that was sent it asks with it, so the 304 check below knows both tags.
+    const compressor = context.compressor;
+    const dynamicTag =
+      compressor !== undefined &&
+      encoding !== undefined &&
+      source.encoding === undefined &&
+      file.stats.size >= compressor.minBytes
+        ? etagOf(file.stats, `-${encoding}`)
+        : undefined;
+
     // Conditional requests: If-None-Match wins over If-Modified-Since.
     const ifNoneMatch = req.headers["if-none-match"];
     const ifModifiedSince = req.headers["if-modified-since"];
+    const matched =
+      typeof ifNoneMatch === "string"
+        ? [dynamicTag, etag].find((tag) => tag !== undefined && noneMatch(ifNoneMatch, tag))
+        : undefined;
     const notModified =
       typeof ifNoneMatch === "string"
-        ? noneMatch(ifNoneMatch, etag)
+        ? matched !== undefined
         : typeof ifModifiedSince === "string" &&
           Math.floor(file.stats.mtimeMs / 1000) <= Math.floor(Date.parse(ifModifiedSince) / 1000);
     if (notModified) {
+      if (matched !== undefined) headers["etag"] = matched;
       res.writeHead(304, headers);
       res.end();
       return;
@@ -463,13 +479,11 @@ export function createStaticServer(options: StaticOptions): StaticServer {
     if (selected !== null) range = selected;
 
     // Compress on the fly when nothing precompressed exists, within the concurrency bound.
-    const compressor = context.compressor;
     const dynamic =
       compressor !== undefined &&
+      dynamicTag !== undefined &&
       encoding !== undefined &&
-      source.encoding === undefined &&
-      range === undefined &&
-      size >= compressor.minBytes
+      range === undefined
         ? compressor.open(encoding)
         : undefined;
 
@@ -479,7 +493,7 @@ export function createStaticServer(options: StaticOptions): StaticServer {
       res.writeHead(206, headers);
     } else if (dynamic !== undefined && encoding !== undefined) {
       headers["content-encoding"] = encoding;
-      headers["etag"] = etagOf(file.stats, `-${encoding}`);
+      headers["etag"] = dynamicTag ?? etag;
       delete headers["accept-ranges"];
       res.writeHead(200, headers);
     } else {

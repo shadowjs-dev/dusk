@@ -175,6 +175,15 @@ function pathSource(path: string): string {
 }
 
 /**
+ * A regular expression for the URLs of a page's own file: `/admin/index.html` and `/admin.html` (the root has only
+ * `/index.html`).
+ * @internal
+ */
+function fileFormsSource(path: string): string {
+  return path === "/" ? "^/index\\.html$" : `^${escapeRegex(path)}(?:/index\\.html|\\.html)$`;
+}
+
+/**
  * The routes of `config.json`, in the order Vercel reads them (B2):
  * 1. a page the app's rules apply to (`mode: "handler"`) goes to the function before the filesystem handler, so its
  *    rules and the host routing run for it, and its prerendered file is not served;
@@ -208,7 +217,11 @@ export function vercelRoutes(
     });
   }
   for (const page of pages) {
-    if (page.mode === "handler") routes.push({ src: pathSource(page.path), dest: `/${fn}` });
+    if (page.mode !== "handler") continue;
+    routes.push({ src: pathSource(page.path), dest: `/${fn}` });
+    // The prerendered file is also a URL of its own (`/admin/index.html`, `/admin.html`): it goes to the function too, or
+    // the filesystem would serve it without the app's middleware and rules.
+    routes.push({ src: fileFormsSource(page.path), dest: `/${fn}` });
   }
   for (const page of pages) {
     if (page.mode !== "static") continue;

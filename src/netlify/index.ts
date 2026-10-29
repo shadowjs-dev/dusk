@@ -17,6 +17,7 @@ import { IMMUTABLE_CACHE_CONTROL, immutableFolders } from "../adapter/immutable"
 import { pageHeaderBlock } from "../adapter/page-headers";
 import { checkOutDir } from "../adapter/paths";
 import { type Adapter, NODE_LIKE_CAPABILITIES } from "../adapter/types";
+import type { StaticPage } from "../shared/static-page";
 import type { DuskManifest } from "../vite/build";
 
 /** A redirect of the `_redirects` file. @since 1.0.0 */
@@ -57,6 +58,23 @@ export function staticPaths(context: {
     else if (holdsFiles(join(context.clientDir, entry.name))) paths.add(`/${entry.name}/*`);
   }
   return [...paths].sort();
+}
+
+/**
+ * The forced rewrites that send the pages the app's rules apply to (`mode: "handler"`) to the function. A page is
+ * reachable as `/admin` and as its own files (`/admin/index.html`, `/admin.html`; the root has `/index.html`): all of
+ * them go to the function, or the file would be served without the app's middleware.
+ * @internal
+ */
+export function pageRewritesOf(pages: readonly StaticPage[], functionPath: string): string[] {
+  return pages
+    .filter((page) => page.mode === "handler")
+    .flatMap((page) =>
+      (page.path === "/"
+        ? ["/", "/index.html"]
+        : [page.path, `${page.path}/index.html`, `${page.path}.html`]
+      ).map((from) => `${from} ${functionPath} 200!`),
+    );
 }
 
 /** True when a folder holds anything but prerendered HTML (a page folder stays with the function). */
@@ -141,9 +159,7 @@ export function netlify(options: NetlifyAdapterOptions = {}): Adapter {
       // B2: a prerendered page the app's rules apply to is answered by the function (a forced rewrite: a static file would
       // win otherwise), and a static page gets its headers in the _headers file. A header must not contain a line break.
       const functionPath = edge ? "/.netlify/edge-functions/render" : "/.netlify/functions/render";
-      const pageRewrites = context.staticPages
-        .filter((page) => page.mode === "handler")
-        .map((page) => `${page.path} ${functionPath} 200!`);
+      const pageRewrites = pageRewritesOf(context.staticPages, functionPath);
       const redirectLines = [
         ...checked.redirects.map(
           (redirect) => `${redirect.from} ${redirect.to} ${redirect.status ?? 301}`,

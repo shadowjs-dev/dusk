@@ -2,7 +2,7 @@ import { onMount } from "@shadow-js/core";
 import { isServer } from "@shadow-js/web";
 import { tryGetRequestEvent } from "../internal/request-context";
 import type { RequestEvent } from "../server/types";
-import { loadScript, type ScriptStrategy } from "../shared/script";
+import { inlineScriptKey, loadScript, type ScriptStrategy } from "../shared/script";
 
 /**
  * `<Script>`: a script in the page with a load strategy, a CSP nonce, de-duplication, and callbacks.
@@ -92,15 +92,24 @@ function loadSource(props: ScriptProps, src: string): void {
 /** Runs inline code once in the browser, unless the page already has it (the server wrote it). */
 function runInline(props: ScriptProps): void {
   const id = props.id;
-  if (id !== undefined && document.getElementById(id) !== null) {
+  const text = props.children ?? "";
+  // Without an id the server marks the script by a key of its text; the text itself settles a (rare) key collision.
+  const written =
+    id === undefined
+      ? [...document.querySelectorAll(`script[data-dusk-script="${inlineScriptKey(text)}"]`)].some(
+          (element) => element.textContent === text,
+        )
+      : document.getElementById(id) !== null;
+  if (written) {
     props.onReady?.();
     return;
   }
   try {
     const element = document.createElement("script");
     if (id !== undefined) element.id = id;
+    else element.setAttribute("data-dusk-script", inlineScriptKey(text));
     if (props.nonce !== undefined) element.nonce = props.nonce;
-    element.textContent = props.children ?? "";
+    element.textContent = text;
     document.head.append(element);
     props.onLoad?.();
     props.onReady?.();
@@ -140,7 +149,13 @@ export function Script(props: ScriptProps): unknown {
       );
     }
     // The inline code is raw text: set as the element's HTML (the checks above keep it from ending the element).
-    const inline = { ...attributes, dangerouslySetInnerHTML: { __html: props.children ?? "" } };
+    const text = props.children ?? "";
+    const inline = {
+      ...attributes,
+      // The browser adopts this script instead of running the text again (see `runInline`).
+      ...(props.id === undefined ? { "data-dusk-script": inlineScriptKey(text) } : {}),
+      dangerouslySetInnerHTML: { __html: text },
+    };
     return <script {...inline} />;
   }
   onMount(() => {

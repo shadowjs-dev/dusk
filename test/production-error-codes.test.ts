@@ -6,6 +6,9 @@ type HeadersModule = typeof import("../src/shared/header-value");
 type CookiesModule = typeof import("../src/server/cookies");
 type CorsModule = typeof import("../src/server/cors");
 type CspModule = typeof import("../src/server/csp");
+type ResolveModule = typeof import("../src/metadata/resolve");
+type UrlModule = typeof import("../src/metadata/url");
+type ToHeadModule = typeof import("../src/metadata/to-head");
 
 const CODE = /^DUSK_[A-Z]+(?:_\d+)?(?: \S+)?$/;
 
@@ -84,6 +87,22 @@ describe("production error codes of the server options", () => {
     for (const [name, message] of Object.entries(messages)) {
       expect(message, name).toMatch(CODE);
     }
+    expect(new Set(Object.values(messages)).size).toBe(Object.keys(messages).length);
+  });
+
+  it("[ERR-CODES-12] metadata refusals carry a DUSK_META code in production, no development text", async () => {
+    const dir = join(import.meta.dirname, "../src/metadata");
+    const resolve = await loadProduction<ResolveModule>(join(dir, "resolve.ts"));
+    const url = await loadProduction<UrlModule>(join(dir, "url.ts"));
+    const toHead = await loadProduction<ToHeadModule>(join(dir, "to-head.ts"));
+    const messages = {
+      header: messageOf(() => resolve.checkedHeaders({ "bad name": "x" }, "blog")),
+      base: messageOf(() => url.resolveMetadataBase("not a url")),
+      jsonLd: messageOf(() => toHead.jsonLdText("text")),
+      jsonLdLength: messageOf(() => toHead.jsonLdText({ a: "x".repeat(2_000_000) })),
+    };
+    expect(messages.header).toBe("DUSK_META_1 blog");
+    for (const [name, message] of Object.entries(messages)) expect(message, name).toMatch(CODE);
     expect(new Set(Object.values(messages)).size).toBe(Object.keys(messages).length);
   });
 });

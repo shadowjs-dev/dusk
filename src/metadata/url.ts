@@ -46,7 +46,9 @@ export function resolveMetadataBase(value: URL | string | null | undefined): URL
   const parsed = URL.canParse(text) ? new URL(text) : undefined;
   if (parsed === undefined || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
     throw new TypeError(
-      `metadataBase must be an absolute http(s) URL, got ${JSON.stringify(text)}.`,
+      __DEV__
+        ? `metadataBase must be an absolute http(s) URL, got ${JSON.stringify(text)}.`
+        : "DUSK_META_5",
     );
   }
   return parsed;

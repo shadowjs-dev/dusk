@@ -16,6 +16,7 @@ import {
   fetchBounded,
   isLoopbackHost,
   parseJsonObject,
+  waitFor,
 } from "./http";
 import { createJwksCache, type JwksCache } from "./jwks";
 import {
@@ -470,7 +471,7 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
 
   const discover = async (event: RequestEvent): Promise<Resolved> => {
     const issuer = options.issuer as string;
-    const policy = policyOf(event);
+    const policy: FetchPolicy = { ...policyOf(event), signal: undefined };
     const base = checkEndpointUrl(issuer, "issuer", policy.allowLoopbackHttp);
     const address = new URL(`${base.href.replace(/\/$/, "")}/.well-known/openid-configuration`);
     const response = await fetchBounded(policy, address, {});
@@ -518,13 +519,14 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
   const endpointsOf = async (event: RequestEvent): Promise<Resolved> => {
     if (options.endpoints !== undefined) return resolveStatic(event, options.endpoints);
     if (discovered !== undefined && now() - discovered.at < discoveryMs) return discovered.value;
-    if (discovery !== undefined) return discovery;
+    if (discovery !== undefined) return waitFor(discovery, event.signal);
     if (now() < retryAfter) {
       throw new OidcError(
         "OIDC_DISCOVERY_FAILED",
         "Discovery failed a moment ago; not trying again yet.",
       );
     }
+    // The fetch is shared, so it ends by its own timeout only; each caller stops waiting on its own signal.
     discovery = discover(event)
       .then((value) => {
         discovered = { value, at: now() };
@@ -537,7 +539,7 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
       .finally(() => {
         discovery = undefined;
       });
-    return discovery;
+    return waitFor(discovery, event.signal);
   };
 
   // ---- the provider -------------------------------------------------------------------------------

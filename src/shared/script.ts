@@ -25,6 +25,20 @@ export interface ScriptOptions {
   readonly nonce?: string;
 }
 
+/**
+ * A short key for inline code, written on the server's `<script data-dusk-script>` so the browser can tell the script the
+ * server wrote from one it has yet to run. It is a 32-bit FNV-1a hash and the length; a match is confirmed by comparing the
+ * text, so a collision costs nothing.
+ * @internal
+ */
+export function inlineScriptKey(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  }
+  return `${(hash >>> 0).toString(36)}-${text.length.toString(36)}`;
+}
+
 const NONCE = /^[A-Za-z0-9+/=_-]{1,256}$/;
 const ESCAPES: Readonly<Record<string, string>> = {
   "&": "&amp;",

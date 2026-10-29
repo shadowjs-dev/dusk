@@ -101,6 +101,17 @@ function describeExit(code: number | null, signal: string | null): string {
   return signal === null ? `exit code ${String(code)}` : `signal ${signal}`;
 }
 
+/**
+ * True for the errors a call to a worker raises because the worker has already left: no such process, or a channel that is
+ * closed. Those are not worth a line; any other error is.
+ *
+ * @internal
+ */
+export function isWorkerGone(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : undefined;
+  return code === "ESRCH" || code === "ERR_IPC_DISCONNECTED" || code === "ERR_IPC_CHANNEL_CLOSED";
+}
+
 /** Fails with the error of `listen` when the port cannot be bound; the workers would each fail the same way. */
 function probePort(port: number, host: string): Promise<void> {
   if (port === 0) return Promise.resolve();
@@ -254,8 +265,10 @@ export async function superviseWorkers(options: PoolOptions): Promise<ServerHand
   const signalWorker = (member: Member, signal: NodeJS.Signals): void => {
     try {
       member.worker.process.kill(signal);
-    } catch {
-      // already gone
+    } catch (error) {
+      // A worker that is already gone is the expected case; anything else (a bad signal, a permission) is said aloud.
+      if (!isWorkerGone(error))
+        log(`worker ${member.id}: could not send ${signal}: ${String(error)}`);
     }
   };
   const killWorker = (member: Member): void => signalWorker(member, "SIGKILL");
@@ -337,15 +350,18 @@ export async function superviseWorkers(options: PoolOptions): Promise<ServerHand
     // this with its soft shutdown (see `serve`), so idle connections are not cut.
     try {
       member.worker.disconnect();
-    } catch {
+    } catch (error) {
       // The worker is already gone: the drain message below fails the same way and the kill follows.
+      if (!isWorkerGone(error)) log(`worker ${member.id}: could not disconnect: ${String(error)}`);
     }
     const message: DrainMessage = { dusk: "drain" };
     try {
       member.worker.send(message, (error) => {
         if (error !== null) signalWorker(member, "SIGTERM");
       });
-    } catch {
+    } catch (error) {
+      if (!isWorkerGone(error))
+        log(`worker ${member.id}: could not send the drain message: ${String(error)}`);
       signalWorker(member, "SIGTERM");
     }
     const timer = setTimeout(() => {

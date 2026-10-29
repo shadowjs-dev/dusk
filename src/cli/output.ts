@@ -417,9 +417,6 @@ export function shortcutLines(term: Terminal): string[] {
 
 // ---- build summary -----------------------------------------------------------------------------
 
-/** The folder the build writes (relative to the app). @internal */
-const BUILD_OUTPUT = "dist";
-
 const STEP_LABEL = {
   client: "Compiled client",
   server: "Compiled server",
@@ -605,6 +602,7 @@ function legendLines(rows: readonly RouteRow[], term: Terminal): string[] {
  */
 export function buildLines(summary: BuildSummary, term: Terminal): string[] {
   const glyphs = glyphsOf(term);
+  const outDir = summary.outDir ?? "dist";
   const lines: string[] = [headerLine(term, `${summary.version} (production)`), ""];
   // Each phase: a name, what it wrote, how long it took. The columns are as wide as their longest entry.
   const phases: { name: string; detail: string; ms: number; extra: readonly string[] }[] = [];
@@ -612,7 +610,7 @@ export function buildLines(summary: BuildSummary, term: Terminal): string[] {
     if (entry.name === "client" || entry.name === "server") {
       phases.push({
         name: STEP_LABEL[entry.name],
-        detail: `${BUILD_OUTPUT}/${entry.name}`,
+        detail: `${outDir}/${entry.name}`,
         ms: entry.ms,
         extra: [],
       });
@@ -655,11 +653,11 @@ export function buildLines(summary: BuildSummary, term: Terminal): string[] {
   }
   lines.push(
     "",
-    `${paint(term, "green", glyphs.ok)} Built in ${durationText(summary.ms)}, output in ${BUILD_OUTPUT}/`,
+    `${paint(term, "green", glyphs.ok)} Built in ${durationText(summary.ms)}, output in ${outDir}/`,
   );
   if (summary.adapter?.name === "node") {
     lines.push(
-      `${INDENT}${paint(term, "dim", "Serve it with `dusk start`, or run `node dist/node/server.mjs`.")}`,
+      `${INDENT}${paint(term, "dim", `Serve it with \`dusk start\`, or run \`node ${summary.adapter.outDir}/server.mjs\`.`)}`,
     );
   }
   return lines;

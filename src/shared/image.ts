@@ -1,4 +1,5 @@
 import type { HeadTag } from "@shadow-js/web";
+import { hasControl } from "../internal/text";
 
 /**
  * Image attributes for `<img>`: responsive candidates, lazy or priority loading, and a box that keeps its
@@ -149,8 +150,8 @@ export interface ImageProps {
  * @since 1.0.0
  */
 export const defaultImageLoader: ImageLoader = ({ src, width, quality, format }) => {
-  const query = `url=${encodeURIComponent(src)}&w=${width}&q=${quality}`;
-  return `${activeBase}/_dusk/image?${format === undefined ? query : `${query}&f=${format}`}`;
+  const type = format === undefined ? "" : `&f=${format}`;
+  return `${activeBase}/_dusk/image?url=${encodeURIComponent(src)}&w=${width}&q=${quality}${type}`;
 };
 
 /**
@@ -198,19 +199,42 @@ function candidateWidths(
 
 /** A source that may be used: a path on this origin, or an absolute http(s) URL. */
 function checkSource(src: string): void {
-  if (src.startsWith("/") && !src.startsWith("//") && !src.startsWith("/\\")) return;
-  if (URL.canParse(src)) {
-    const { protocol } = new URL(src);
-    if (protocol === "http:" || protocol === "https:") return;
+  // A browser drops tabs and line breaks from a URL before it reads it, so `/<TAB>/host` is `//host`.
+  if (!hasControl(src)) {
+    if (src.startsWith("/") && !src.startsWith("//") && !src.startsWith("/\\")) return;
+    if (URL.canParse(src)) {
+      const { protocol } = new URL(src);
+      if (protocol === "http:" || protocol === "https:") return;
+    }
   }
   throw new TypeError(
-    `imageProps: the src ${JSON.stringify(src)} must be a path on this origin or an http(s) URL.`,
+    __DEV__
+      ? `imageProps: the src ${JSON.stringify(src)} must be a path on this origin or an http(s) URL, without control characters.`
+      : "DUSK_IMGPROPS_4",
   );
 }
 
 function positiveInteger(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1)
-    throw new RangeError(`imageProps: ${name} must be a positive integer.`);
+    throw new RangeError(
+      __DEV__ ? `imageProps: ${name} must be a positive integer.` : `DUSK_IMGPROPS_3 ${name}`,
+    );
+}
+
+/**
+ * The attributes every image has whether or not it is optimized: how it loads, and the box that keeps its aspect ratio.
+ * @internal
+ */
+export function loadingAttributes(
+  box: Pick<ImagePropsOptions, "width" | "height" | "priority">,
+): Pick<ImageProps, "loading" | "decoding" | "fetchpriority" | "style"> {
+  const priority = box.priority === true;
+  return {
+    loading: priority ? "eager" : "lazy",
+    decoding: "async",
+    fetchpriority: priority ? "high" : "auto",
+    style: `aspect-ratio: ${box.width} / ${box.height}`,
+  };
 }
 
 /**
@@ -233,17 +257,22 @@ export function imageProps(options: ImagePropsOptions): ImageProps {
   positiveInteger("width", options.width);
   positiveInteger("height", options.height);
   if (typeof options.alt !== "string")
-    throw new TypeError("imageProps: alt is required (an empty string for decorative images).");
+    throw new TypeError(
+      __DEV__
+        ? "imageProps: alt is required (an empty string for decorative images)."
+        : "DUSK_IMGPROPS_1",
+    );
   const quality = options.quality ?? 75;
   if (!Number.isInteger(quality) || quality < 1)
-    throw new RangeError("imageProps: quality must be an integer from 1 to 100.");
+    throw new RangeError(
+      __DEV__ ? "imageProps: quality must be an integer from 1 to 100." : "DUSK_IMGPROPS_2",
+    );
   const q = Math.min(quality, 100);
   const loader = options.loader ?? defaultImageLoader;
   const format = options.format;
   // Only an offered width may be written: the optimizer answers 400 for any other `w`.
   const widths = candidateWidths(active, options.width, options.sizes);
   const url = (width: number): string => loader({ src: options.src, width, quality: q, format });
-  const priority = options.priority === true;
   return {
     src: url(cover(active, options.width)),
     srcset: widths.map((width) => `${url(width)} ${width}w`).join(", "),
@@ -251,10 +280,7 @@ export function imageProps(options: ImagePropsOptions): ImageProps {
     width: options.width,
     height: options.height,
     alt: options.alt,
-    loading: priority ? "eager" : "lazy",
-    decoding: "async",
-    fetchpriority: priority ? "high" : "auto",
-    style: `aspect-ratio: ${options.width} / ${options.height}`,
+    ...loadingAttributes(options),
   };
 }
 

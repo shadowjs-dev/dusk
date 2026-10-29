@@ -71,12 +71,15 @@ export function expectKeys(
   value: unknown,
   allowed: readonly string[],
 ): asserts value is Readonly<Record<string, unknown>> {
-  if (!isRecord(value)) throw new TypeError(`${where} must be an object.`);
+  if (!isRecord(value))
+    throw new TypeError(__DEV__ ? `${where} must be an object.` : `DUSK_OPTION ${where}`);
   for (const key of Object.keys(value)) {
     if (allowed.includes(key)) continue;
-    const hint = suggestKey(key, allowed);
+    const hint = __DEV__ ? suggestKey(key, allowed) : undefined;
     throw new TypeError(
-      `${where}: unknown key "${key}"${hint === undefined ? "" : `; did you mean "${hint}"?`}`,
+      __DEV__
+        ? `${where}: unknown key "${key}"${hint === undefined ? "" : `; did you mean "${hint}"?`}`
+        : `DUSK_UNKNOWN ${where} ${key}`,
     );
   }
 }

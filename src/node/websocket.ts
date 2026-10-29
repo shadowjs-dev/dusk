@@ -2,7 +2,7 @@ import { type IncomingMessage, STATUS_CODES } from "node:http";
 import { Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { UpgradeDecision, WebSocketSink } from "../server/index";
-import { platformOf } from "./bridge";
+import { lastValue, platformOf } from "./bridge";
 import { isClientDisconnect } from "./serve";
 
 /**
@@ -18,6 +18,8 @@ export interface UpgradeContext {
   readonly decide: (request: Request, platform: unknown) => Promise<UpgradeDecision>;
   /** https servers give `https:` request URLs. */
   readonly secure: boolean;
+  /** Believe `X-Forwarded-Host` and `X-Forwarded-Proto` for the request URL, as the request bridge does. Default false. */
+  readonly trustProxy?: boolean;
   /** True once shutdown started: new upgrades are refused with 503. */
   readonly draining: () => boolean;
   /** Receives failures nobody can answer (a broken socket, a handler that threw). */
@@ -46,12 +48,28 @@ function occurrences(rawHeaders: readonly string[], name: string): number {
  * The Host decides the URL the routes and the origin check see, so it is checked as strictly as for a plain request.
  * @internal
  */
-export function upgradeRequestOf(req: IncomingMessage, secure: boolean): Request | undefined {
-  const host = req.headers.host;
+export function upgradeRequestOf(
+  req: IncomingMessage,
+  secure: boolean,
+  trustProxy = false,
+): Request | undefined {
+  // Behind a trusted proxy the visitor's URL is the forwarded one, exactly as for a plain request (`requestUrlOf`): the
+  // origin check compares the browser's `Origin` with this URL, and the host list is applied to its host.
+  const forwardedHost = trustProxy ? lastValue(req.headers["x-forwarded-host"]) : undefined;
+  const host = forwardedHost ?? req.headers.host;
   const target = req.url ?? "/";
   if (typeof host !== "string" || !HOST.test(host) || !target.startsWith("/")) return undefined;
   if (occurrences(req.rawHeaders, "host") > 1) return undefined;
-  const url = `${secure ? "https" : "http"}://${host}${target}`;
+  const forwardedProto = trustProxy
+    ? lastValue(req.headers["x-forwarded-proto"])?.toLowerCase()
+    : undefined;
+  const scheme =
+    forwardedProto === "https" || forwardedProto === "http"
+      ? forwardedProto
+      : secure
+        ? "https"
+        : "http";
+  const url = `${scheme}://${host}${target}`;
   if (!URL.canParse(url)) return undefined;
   try {
     const headers = new Headers();
@@ -68,6 +86,14 @@ export function upgradeRequestOf(req: IncomingMessage, secure: boolean): Request
   }
 }
 
+/** Headers {@link refuse} writes itself (`set-cookie` goes out line by line). */
+const REFUSAL_OWNED: ReadonlySet<string> = new Set([
+  "set-cookie",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+]);
+
 /** Writes an HTTP response to a socket that has not been upgraded, then ends the socket. */
 async function refuse(
   socket: Duplex,
@@ -78,8 +104,10 @@ async function refuse(
 ): Promise<void> {
   const bytes = body === null ? new Uint8Array(0) : new TextEncoder().encode(body);
   const lines = [`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? message}`];
+  // The refusal frames its own body below: a length, coding or connection header of the response would be a second,
+  // conflicting framing on the same message.
   headers.forEach((value, name) => {
-    if (name !== "set-cookie") lines.push(`${name}: ${value}`);
+    if (!REFUSAL_OWNED.has(name)) lines.push(`${name}: ${value}`);
   });
   for (const cookie of headers.getSetCookie()) lines.push(`set-cookie: ${cookie}`);
   lines.push(`content-length: ${bytes.byteLength}`, "connection: close", "", "");
@@ -130,7 +158,7 @@ export async function answerUpgrade(
       await refuse(socket, 503, "Service Unavailable", new Headers({ "retry-after": "1" }), null);
       return;
     }
-    const request = upgradeRequestOf(req, context.secure);
+    const request = upgradeRequestOf(req, context.secure, context.trustProxy === true);
     if (request === undefined) {
       await refuse(socket, 400, "Bad Request", new Headers(), null);
       return;

@@ -9,7 +9,7 @@ import { RPC_BATCH_ID, RPC_LOCATION_HEADER } from "../shared/wire";
 import { cacheControlHeader, resolveCacheControl } from "./cache-control";
 import { runWithEvent } from "./context";
 import { checkDeploymentHeader, deploymentMismatchEnvelope } from "./deployment";
-import { describeError, type ErrorDescription, errorBody } from "./errors";
+import { describeError, type ErrorDescription, encodeLocation, errorBody } from "./errors";
 import { EventState } from "./event";
 import { missingFeature } from "./features";
 import { isNoSecrets, writeFlash } from "./flash";
@@ -147,7 +147,7 @@ function backResponse(rt: RpcRuntime, event: EventState, headers: Headers): Resp
         : undefined;
     if (typeof checked === "string") back = checked;
   }
-  headers.set("location", back);
+  headers.set("location", encodeLocation(back));
   return new Response(null, { status: 303, headers });
 }
 
@@ -192,7 +192,7 @@ async function formResponse(
     const error = outcome.error;
     const to = isRedirect(error) ? checkRedirectTarget(error.to, rt.policyFor(event)) : undefined;
     if (isRedirect(error) && typeof to === "string") {
-      headers.set("location", to.startsWith("/") ? `${rt.config.base}${to}` : to);
+      headers.set("location", encodeLocation(to.startsWith("/") ? `${rt.config.base}${to}` : to));
       return new Response(null, {
         status: redirectStatus(error) === 302 ? 303 : redirectStatus(error),
         headers,
@@ -258,6 +258,8 @@ export async function revalidatedFor(
     dev: event.dev,
     lang: rt.config.document.lang,
   });
+  // The identity the app-wide middleware worked out for the mutation (the page's middleware and loaders read it).
+  page.inheritFrom(event);
   const router = createRouter({
     routes,
     // The same router features as a page render of these routes (see `PageRuntime.routerFeatures`).
@@ -273,14 +275,40 @@ export async function revalidatedFor(
     onError: (error) => rt.report(error, "loader", page),
   });
   try {
-    const outcome = await runWithEvent(page, () => router.ready(), rt.config.asyncContext);
-    if (outcome.kind !== "success") return undefined;
-    const data = router.dehydrate();
+    let data: HydrationData | undefined;
+    let reached = false;
+    const loaders = async (): Promise<Response> => {
+      reached = true;
+      const outcome = await router.ready();
+      if (outcome.kind === "success") data = router.dehydrate();
+      return new Response(null, { status: 204 });
+    };
+    // The loaders of a page are behind the page's server middleware (`_middleware` folders and `middleware` exports): the
+    // same check that guards a page request guards this one, or a visitor could read the loader data of a page they may
+    // not open by naming it in the location header. The code that runs a chain loads only for an app that has middleware
+    // (its own module: a dynamic import of a module the pages feature imports statically would not split anything).
+    const manifestMiddleware = rt.config.manifest.middleware;
+    const guarded = async (): Promise<Response> =>
+      manifestMiddleware === undefined
+        ? loaders()
+        : (await import("./single-flight-guard")).runPageMiddleware(
+            manifestMiddleware,
+            rt.pageMatcher,
+            url.pathname,
+            page,
+            loaders,
+          );
+    const answered = await runWithEvent(page, guarded, rt.config.asyncContext);
+    // A middleware that answered itself (a refusal, a redirect) did not let the visitor in: nothing is sent, and the
+    // browser loads the page as it would without single flight, which gives it the refusal.
+    if (!reached || answered.status !== 204 || data === undefined) return undefined;
     return encoder.encode(serialize(data)).byteLength <= rt.config.maxPayloadBytes
       ? data
       : undefined;
   } catch (error) {
-    rt.report(error, "rpc", event);
+    // A refusal or a redirect thrown by the middleware is an answer, not a fault.
+    if (!isRedirect(error) && describeError(error, event.dev).report)
+      rt.report(error, "rpc", event);
     return undefined;
   } finally {
     router.dispose();

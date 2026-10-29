@@ -7,7 +7,7 @@ import type { ResolvedRouting, RouteRule } from "../shared/routing-config";
 import { NO_ROUTING } from "../shared/routing-empty";
 import { NAV_PATH, RPC_PREFIX } from "../shared/wire";
 import { takeAfterTasks } from "./after";
-import { allowedMethods, allowOf, answersMethod, bodyLimitOf, runMiddleware } from "./api";
+import { allowedMethods, allowOf, answersMethod, bodyLimitOf } from "./api";
 import { resolveClientAddress } from "./client-address";
 import { type ResolvedConfig, resolveConfig, warnToConsole } from "./config";
 import { runWithEvent } from "./context";
@@ -53,6 +53,7 @@ import {
   createLargeBodyWatch,
   refuseDeclaredLength,
 } from "./limits";
+import { runMiddleware } from "./middleware-chain";
 import type { Observer } from "./observe";
 import { hostGeoOf } from "./platform";
 import { patternOfChain, pickCandidate, type RouteCandidate } from "./precedence";
@@ -72,6 +73,7 @@ import type {
   RequestEvent,
   RouteInfo,
 } from "./types";
+import { mergeVary } from "./vary";
 
 const ALLOWED_METHODS: ReadonlySet<string> = new Set([
   "GET",
@@ -260,48 +262,48 @@ function checkNeeds(
 ): void {
   const { manifest } = config;
   if (manifest.routes.length > 0 && capabilities.pages === undefined) {
-    need("pages", `the manifest's ${manifest.routes.length} page route(s)`);
+    need("pages", __DEV__ ? `the manifest's ${manifest.routes.length} page route(s)` : "");
   }
   if (manifest.apiRoutes.length > 0 && capabilities.apiRoutes === undefined) {
-    need("apiRoutes", `the manifest's ${manifest.apiRoutes.length} API route(s)`);
+    need("apiRoutes", __DEV__ ? `the manifest's ${manifest.apiRoutes.length} API route(s)` : "");
   }
   if ((manifest.streams?.length ?? 0) > 0 && capabilities.streams === undefined) {
-    need("streams", `the manifest's ${manifest.streams?.length} stream route(s)`);
+    need("streams", __DEV__ ? `the manifest's ${manifest.streams?.length} stream route(s)` : "");
   }
   if (Object.keys(manifest.serverFns).length > 0 && capabilities.rpc === undefined) {
-    need("rpc", "the manifest's server functions");
+    need("rpc", __DEV__ ? "the manifest's server functions" : "");
   }
   if (capabilities.pages?.revalidates === true && capabilities.isr === undefined) {
-    need("isr", "a page that exports revalidate");
+    need("isr", __DEV__ ? "a page that exports revalidate" : "");
   }
   const routing = capabilities.routing?.rules ?? NO_ROUTING;
   if (routing.routeRules.some((entry) => entry.rule.revalidate !== undefined)) {
-    if (capabilities.isr === undefined) need("isr", "a route rule with revalidate");
+    if (capabilities.isr === undefined) need("isr", __DEV__ ? "a route rule with revalidate" : "");
   }
   if (options.routing !== undefined && capabilities.routing === undefined) {
-    need("routing", 'the option "routing"');
+    need("routing", __DEV__ ? 'the option "routing"' : "");
   }
   if (options.cache !== undefined && capabilities.isr === undefined) {
-    need("isr", 'the option "cache"');
+    need("isr", __DEV__ ? 'the option "cache"' : "");
   }
   if (options.images !== undefined && capabilities.images === undefined) {
-    need("images", 'the option "images"');
+    need("images", __DEV__ ? 'the option "images"' : "");
   }
   if (options.streams !== undefined && capabilities.streams === undefined) {
-    need("streams", 'the option "streams"');
+    need("streams", __DEV__ ? 'the option "streams"' : "");
   }
   if (options.globalError !== undefined && capabilities.pages === undefined) {
-    need("pages", 'the option "globalError"');
+    need("pages", __DEV__ ? 'the option "globalError"' : "");
   }
   if (options.draft !== undefined && capabilities.draftMode === undefined) {
-    need("draftMode", 'the option "draft"');
+    need("draftMode", __DEV__ ? 'the option "draft"' : "");
   }
   if (options.rpc !== undefined && capabilities.rpc === undefined) {
-    need("rpc", 'the option "rpc"');
+    need("rpc", __DEV__ ? 'the option "rpc"' : "");
   }
   if (capabilities.pages === undefined) {
     for (const key of PAGE_OPTIONS) {
-      if (options[key] !== undefined) need("pages", `the option "${key}"`);
+      if (options[key] !== undefined) need("pages", __DEV__ ? `the option "${key}"` : "");
     }
   }
 }
@@ -514,8 +516,14 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     const headers = new Headers(response.headers);
     for (const [name, value] of event.responseHeaders) {
       if (name === "set-cookie") continue;
-      if (!headers.has(name)) headers.set(name, value);
+      // `Vary` is a list both sides add to (CORS adds `Origin`): the route's own names do not drop the framework's.
+      if (name === "vary") mergeVary(headers, value);
+      else if (!headers.has(name)) headers.set(name, value);
     }
+    // An origin that is not listed (or none) gets a different answer from a listed one (it has no grant): a shared cache
+    // must key on `Origin` for every answer of an API route, or it hands one the other's. Added here, after the route ran,
+    // because a route that sets `event.responseHeaders` `Vary` replaces whatever was put there before it.
+    if (config.cors !== undefined && event.route.kind === "api") mergeVary(headers, "origin");
     for (const value of event.responseHeaders.getSetCookie()) headers.append("set-cookie", value);
     for (const cookie of event.cookies.serialized()) headers.append("set-cookie", cookie);
     if (config.headers !== false) {
@@ -759,7 +767,9 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       const cors = corsHeadersFor(config.cors, event.request.headers.get("origin"), preflight);
       if (cors !== undefined) {
         if (preflight) return new Response(null, { status: 204, headers: cors });
-        for (const [name, value] of Object.entries(cors)) event.responseHeaders.set(name, value);
+        for (const [name, value] of Object.entries(cors)) {
+          if (name !== "vary") event.responseHeaders.set(name, value);
+        }
       }
     }
     const csrfApplies = resolution.kind !== "api" || resolution.hit.module.csrf !== false;
@@ -1195,9 +1205,8 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       return parsedEnv;
     },
     // An empty list is no host check, which the type reports as `undefined` (see DuskHandler).
-    allowedHosts: options.security?.allowedHosts?.length
-      ? options.security.allowedHosts
-      : undefined,
+    allowedHosts:
+      options.security?.allowedHosts?.length === 0 ? undefined : options.security?.allowedHosts,
     fetch: fetchHandler,
     // The shell needs the pages feature; without it the promise rejects with the factory to add.
     renderShell: (request = new Request("http://localhost/")) =>

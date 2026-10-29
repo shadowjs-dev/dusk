@@ -230,20 +230,25 @@ const KNOWN: ReadonlySet<string> = new Set(FEATURE_ORDER);
  */
 export function sortFeatures(features: readonly DuskFeature[] | undefined): DuskFeature[] {
   if (features === undefined) return [];
-  if (!Array.isArray(features)) throw new TypeError("createHandler: features must be an array.");
+  if (!Array.isArray(features))
+    throw new TypeError(__DEV__ ? "createHandler: features must be an array." : "DUSK_FEATURES");
   const byName = new Map<FeatureName, DuskFeature>();
   for (const feature of features) {
     const name: unknown =
       typeof feature === "object" && feature !== null ? feature.name : undefined;
     if (typeof name !== "string" || !KNOWN.has(name)) {
       throw new TypeError(
-        "createHandler: features must hold feature objects from @shadow-js/dusk/features/<name> (for example pages()).",
+        __DEV__
+          ? "createHandler: features must hold feature objects from @shadow-js/dusk/features/<name> (for example pages())."
+          : "DUSK_FEATURE_1",
       );
     }
     const key = name as FeatureName;
     if (byName.has(key)) {
       throw new TypeError(
-        `createHandler: ${FEATURE_FACTORY[key].call} is listed twice in features.`,
+        __DEV__
+          ? `createHandler: ${FEATURE_FACTORY[key].call} is listed twice in features.`
+          : `DUSK_FEATURE_3 ${key}`,
       );
     }
     byName.set(key, feature);
@@ -256,6 +261,7 @@ export function sortFeatures(features: readonly DuskFeature[] | undefined): Dusk
 
 /** The refusal of a missing feature: names the option or route that needs it and the factory to add. @internal */
 export function missingFeature(name: FeatureName, reason: string): TypeError {
+  if (!__DEV__) return new TypeError(`DUSK_FEATURE_2 ${name}`);
   const { call, from } = FEATURE_FACTORY[name];
   return new TypeError(
     `createHandler: ${reason} needs ${call}. Import it from the "${from}" subpath and add it to features.`,

@@ -1,5 +1,14 @@
 import { type HeadTag, useHead } from "@shadow-js/web";
-import { type ImageFormat, type ImageLoader, imageProps, preloadImageTag } from "../shared/image";
+import { hasControl } from "../internal/text";
+import {
+  type ImageFormat,
+  type ImageLoader,
+  type ImageProps,
+  type ImagePropsOptions,
+  imageProps,
+  loadingAttributes,
+  preloadImageTag,
+} from "../shared/image";
 import { type PrebuiltImages, prebuiltSources } from "./image-prebuilt";
 
 /**
@@ -74,7 +83,7 @@ export interface ImageComponentProps {
 type Prepared = (
   props: ImageComponentProps,
   sizes: string,
-) => { readonly sources: readonly Attributes[]; readonly preload: HeadTag } | undefined;
+) => { readonly sources: readonly SourceAttributes[]; readonly preload: HeadTag } | undefined;
 
 /** Set by {@link configureImageVariants}; an app that prepared no images never sets it, and its bundle holds none of that code. */
 let prepared: Prepared | undefined;
@@ -105,7 +114,7 @@ export function configureImageVariants(images: PrebuiltImages): void {
     const best = sources[0];
     if (best === undefined) return undefined;
     return {
-      sources: sources.map((source) => ({ ...source, sizes })),
+      sources: sources.map((source) => ({ media: undefined, ...source, sizes })),
       // A browser that cannot decode the type skips the preload and loads the image normally.
       preload: {
         tag: "link",
@@ -124,24 +133,46 @@ export function configureImageVariants(images: PrebuiltImages): void {
 
 const BLUR_URL = /^data:image\/(?:png|jpeg|webp|gif|avif);base64,[A-Za-z0-9+/=]{1,8192}$/;
 const COLOR = /^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$/;
-const MIME: Readonly<Record<ImageFormat, string | undefined>> = {
-  original: undefined,
-  webp: "image/webp",
-  avif: "image/avif",
-  jpeg: "image/jpeg",
-  png: "image/png",
-};
 
-/** The attributes of the `<img>` (and of a `<source>`), as plain data. */
-interface Attributes {
-  readonly [name: string]: string | number | boolean | undefined;
+/**
+ * What the `<img>` is written with. The element names every attribute, so a bundle holds the few lines that set them and not
+ * the general code that spreads an object of attributes. A member that is undefined is not written.
+ */
+interface ImgAttributes {
+  readonly src: string;
+  readonly srcset: string | undefined;
+  readonly sizes: string | undefined;
+  readonly alt: string | undefined;
+  readonly loading: "lazy" | "eager";
+  readonly decoding: "async";
+  readonly fetchpriority: "high" | "auto";
+  readonly style: string;
+  readonly width: number | undefined;
+  readonly height: number | undefined;
+  readonly class: string | undefined;
 }
+
+/** What a `<source>` is written with (see {@link ImgAttributes}). */
+interface SourceAttributes {
+  readonly media: string | undefined;
+  readonly type: string | undefined;
+  readonly srcset: string;
+  readonly sizes: string | undefined;
+}
+
+/** The attributes of an image that is not optimized: no candidates, the file as given. */
+type PlainImage = Omit<ImageProps, "srcset" | "sizes"> & {
+  readonly srcset?: undefined;
+  readonly sizes?: string;
+};
 
 function placeholderStyle(props: ImageComponentProps): string {
   if (props.placeholder === "blur") {
     if (props.blurDataURL === undefined || !BLUR_URL.test(props.blurDataURL)) {
       throw new TypeError(
-        'Image: placeholder="blur" needs blurDataURL, a data:image/*;base64 URL of up to 8 KiB.',
+        __DEV__
+          ? 'Image: placeholder="blur" needs blurDataURL, a data:image/*;base64 URL of up to 8 KiB.'
+          : "DUSK_IMAGE_1",
       );
     }
     return `background-image: url("${props.blurDataURL}"); background-size: cover;`;
@@ -149,7 +180,9 @@ function placeholderStyle(props: ImageComponentProps): string {
   if (props.placeholder === "color") {
     if (props.placeholderColor === undefined || !COLOR.test(props.placeholderColor)) {
       throw new TypeError(
-        'Image: placeholder="color" needs placeholderColor, a hex color or a color name.',
+        __DEV__
+          ? 'Image: placeholder="color" needs placeholderColor, a hex color or a color name.'
+          : "DUSK_IMAGE_2",
       );
     }
     return `background-color: ${props.placeholderColor};`;
@@ -158,7 +191,7 @@ function placeholderStyle(props: ImageComponentProps): string {
 }
 
 /** The attributes of the main `<img>`: optimized through `imageProps`, or the source exactly as given. */
-function imageAttributes(props: ImageComponentProps): Attributes {
+function imageAttributes(props: ImageComponentProps): ImgAttributes {
   const placeholder = placeholderStyle(props);
   const fillStyle = "position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;";
   const base =
@@ -171,63 +204,86 @@ function imageAttributes(props: ImageComponentProps): Attributes {
   const style = [props.fill === true ? fillStyle : base.style, placeholder]
     .filter((part) => part !== "")
     .join(" ");
-  const { width, height, ...rest } = base;
-  // An empty candidate list (an unoptimized image) and an absent class are left out, not written as "".
-  const attributes: Record<string, string | number | undefined> = {
-    ...rest,
-    ...(props.fill === true ? {} : { width, height }),
+  const fill = props.fill === true;
+  // An empty class, sizes or candidate list is left out, not written as "". An empty `alt` is kept: it marks the image
+  // decorative, and an `<img>` without `alt` is announced by its file name instead.
+  const written = (value: string | undefined): string | undefined =>
+    value === "" ? undefined : value;
+  return {
+    src: base.src,
+    srcset: written(base.srcset),
+    sizes: written(base.sizes),
+    alt: base.alt,
+    loading: base.loading,
+    decoding: base.decoding,
+    fetchpriority: base.fetchpriority,
     style,
-    class: props.class,
+    width: fill ? undefined : base.width,
+    height: fill ? undefined : base.height,
+    class: written(props.class),
   };
-  for (const name of Object.keys(attributes)) {
-    if (attributes[name] === "" || attributes[name] === undefined) delete attributes[name];
+}
+
+/**
+ * A source an unoptimized image may write, read as a browser reads it (after the blanks around it): a relative reference
+ * (no scheme), `http(s):`, `blob:` or `data:image/*`. Every other scheme (`javascript:`, `vbscript:`, `data:text/html`,
+ * `file:`) fails.
+ */
+const PLAIN_SRC = /^(?![a-z][a-z0-9+.-]*:)|^(?:https?|blob):|^data:image\/[a-z0-9.+-]+[;,]/i;
+
+/**
+ * Checks what an unoptimized image writes. The file is served exactly as given, so nothing downstream looks at the source:
+ * a script-bearing scheme is refused here, and so are control characters (a browser drops tabs and line breaks, so
+ * `java<TAB>script:` is `javascript:`). The size must be a finite positive number (the aspect-ratio box divides by it).
+ */
+function checkPlainImage(props: ImageComponentProps): void {
+  const { src } = props;
+  if (typeof src !== "string" || src === "" || hasControl(src) || !PLAIN_SRC.test(src.trim())) {
+    throw new TypeError(
+      __DEV__
+        ? `Image: the src ${JSON.stringify(src)} must be a relative path, an http(s), blob: or data:image/* URL, without control characters.`
+        : "DUSK_IMAGE_4",
+    );
   }
-  return attributes;
+  for (const name of ["width", "height"] as const) {
+    const value: unknown = props[name];
+    if (typeof value !== "number" || !(value > 0 && value < Number.POSITIVE_INFINITY)) {
+      throw new RangeError(
+        __DEV__
+          ? `Image: ${name} must be a finite number greater than 0 (got ${String(value)}).`
+          : `DUSK_IMAGE_3 ${name}`,
+      );
+    }
+  }
 }
 
 /** The plain `<img>` attributes for a source that is not optimized: no candidates, the file as given. */
-function plainAttributes(props: ImageComponentProps): {
-  src: string;
-  width: number;
-  height: number;
-  alt: string;
-  sizes?: string;
-  loading: "lazy" | "eager";
-  decoding: "async";
-  fetchpriority: "high" | "auto";
-  style: string;
-} {
-  const priority = props.priority === true;
+function plainAttributes(props: ImageComponentProps): PlainImage {
+  checkPlainImage(props);
   return {
     src: props.src,
     width: props.width,
     height: props.height,
     alt: props.alt,
     ...(props.sizes === undefined ? {} : { sizes: props.sizes }),
-    loading: priority ? "eager" : "lazy",
-    decoding: "async",
-    fetchpriority: priority ? "high" : "auto",
-    style: `aspect-ratio: ${props.width} / ${props.height}`,
+    ...loadingAttributes(props),
   };
 }
 
 /** The attributes of one `<source>` of an art-directed picture. */
-function sourceAttributes(source: ArtDirectionSource, quality: number | undefined): Attributes {
-  const built = imageProps({
-    src: source.src,
-    width: source.width,
-    height: source.height,
-    alt: "",
-    ...(source.sizes === undefined ? {} : { sizes: source.sizes }),
-    ...(source.format === undefined ? {} : { format: source.format }),
-    ...(quality === undefined ? {} : { quality }),
-  });
-  const type = source.format === undefined ? undefined : MIME[source.format];
+function sourceAttributes(
+  source: ArtDirectionSource,
+  quality: number | undefined,
+): SourceAttributes {
+  // `imageProps` reads only its own keys and treats an absent one like an undefined one, so the source passes through.
+  const built = imageProps({ ...source, alt: "", quality } as ImagePropsOptions);
+  const { format } = source;
   return {
     media: source.media,
     srcset: built.srcset,
     sizes: built.sizes,
-    ...(type === undefined ? {} : { type }),
+    // Every format but `original` is the MIME type `image/<format>`.
+    type: format === undefined || format === "original" ? undefined : `image/${format}`,
   };
 }
 
@@ -244,8 +300,7 @@ function sourceAttributes(source: ArtDirectionSource, quality: number | undefine
  */
 export function Image(props: ImageComponentProps): unknown {
   const attributes = imageAttributes(props);
-  const found =
-    props.art === undefined ? prepared?.(props, String(attributes["sizes"])) : undefined;
+  const found = props.art === undefined ? prepared?.(props, String(attributes.sizes)) : undefined;
   if (props.priority === true && props.unoptimized === true) {
     // The file itself is the preload target: there are no candidates to offer.
     useHead({
@@ -258,15 +313,45 @@ export function Image(props: ImageComponentProps): unknown {
   const sources =
     found?.sources ?? (props.art ?? []).map((source) => sourceAttributes(source, props.quality));
   // `alt` is a required prop (an empty string marks the image decorative), so every <img> here has one.
-  // biome-ignore lint/a11y/useAltText: the attributes carry the required alt prop.
-  if (sources.length === 0) return <img {...attributes} />;
+  if (sources.length === 0)
+    return (
+      <img
+        src={attributes.src}
+        srcset={attributes.srcset}
+        sizes={attributes.sizes}
+        alt={attributes.alt}
+        loading={attributes.loading}
+        decoding={attributes.decoding}
+        fetchpriority={attributes.fetchpriority}
+        style={attributes.style}
+        width={attributes.width}
+        height={attributes.height}
+        class={attributes.class}
+      />
+    );
   return (
     <picture>
       {sources.map((source) => (
-        <source {...source} />
+        <source
+          media={source.media}
+          type={source.type}
+          srcset={source.srcset}
+          sizes={source.sizes}
+        />
       ))}
-      {/* biome-ignore lint/a11y/useAltText: the attributes carry the required alt prop. */}
-      <img {...attributes} />
+      <img
+        src={attributes.src}
+        srcset={attributes.srcset}
+        sizes={attributes.sizes}
+        alt={attributes.alt}
+        loading={attributes.loading}
+        decoding={attributes.decoding}
+        fetchpriority={attributes.fetchpriority}
+        style={attributes.style}
+        width={attributes.width}
+        height={attributes.height}
+        class={attributes.class}
+      />
     </picture>
   );
 }

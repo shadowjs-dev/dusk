@@ -51,6 +51,27 @@ interface EntryModule {
 /** Most modules the style collection visits for one page. */
 const MAX_STYLE_MODULES = 5000;
 
+/**
+ * URLs Vite itself owns: its client, the module ids (`/@id/`, `/@fs/`), the React refresh runtime and its `__vite*` and
+ * `__open-in-editor` endpoints. A bare `/@` or `/__` prefix is not enough: a page route may start with `@` (`/@me`, a
+ * profile page) and the app answers it in production, so the dev server must too.
+ */
+const VITE_INTERNAL =
+  /^\/(?:@(?:vite|id|fs|react-refresh|vite-plugin[^/?]*)(?:[/?]|$)|__(?:vite|open-in-editor|inspect)[^/?]*(?:[/?]|$))/;
+
+/**
+ * True for a request URL (path and query) that Vite answers and the app's handler never sees.
+ *
+ * @param url The request URL as the middleware stack sees it (the base is already stripped).
+ * @returns Whether the request belongs to Vite.
+ * @example isViteInternal("/@vite/client"); // true; isViteInternal("/@me") is false
+ * @internal
+ * @since 1.0.0
+ */
+export function isViteInternal(url: string): boolean {
+  return VITE_INTERNAL.test(url);
+}
+
 const STYLE_URL = /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss|sss)(?:\?|$)/;
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -369,7 +390,7 @@ export function devMiddleware(
   const protocol = server.config.server.https === undefined ? "http" : "https";
   return (req, res, next) => {
     const url = req.url ?? "/";
-    if (url.startsWith("/@") || url.startsWith("/__")) {
+    if (isViteInternal(url)) {
       next();
       return;
     }

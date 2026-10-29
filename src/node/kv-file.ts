@@ -47,6 +47,21 @@ function isStored(value: unknown): value is Stored {
   );
 }
 
+/**
+ * The entry a file holds, or `undefined` when the text is not one (damaged, or a file of another tool that sits in the
+ * folder): such a file is no entry, for `get` and `list` alike.
+ */
+function parseStored(raw: string): Stored | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Not an entry (see above): the reader treats it as absent.
+    return undefined;
+  }
+  return isStored(parsed) ? parsed : undefined;
+}
+
 function isMissing(error: unknown): boolean {
   return typeof error === "object" && error !== null && Reflect.get(error, "code") === "ENOENT";
 }
@@ -115,8 +130,8 @@ export function createFileKVStore(options: FileKVStoreOptions): KVStore {
   const fileOf = (key: string): string =>
     join(options.directory, `${createHash("sha256").update(key).digest("hex")}.json`);
 
-  /** Reads a file; a missing or damaged file is no entry. Expired entries are removed as found. */
-  const read = async (key: string): Promise<Stored | undefined> => {
+  /** Reads a file; a missing or damaged file is no entry. */
+  const load = async (key: string): Promise<Stored | undefined> => {
     let raw: string;
     try {
       raw = await readFile(fileOf(key), "utf8");
@@ -124,18 +139,31 @@ export function createFileKVStore(options: FileKVStoreOptions): KVStore {
       if (isMissing(error)) return undefined;
       throw error;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return undefined;
-    }
-    if (!isStored(parsed)) return undefined;
-    if (parsed.expiresAt !== null && now() >= parsed.expiresAt) {
+    return parseStored(raw);
+  };
+
+  /**
+   * Reads an entry; an expired one is removed as found. `held` says the caller holds the key's lock. Otherwise the
+   * removal takes the lock and looks again: a `set` that landed since the read must not lose its fresh value to
+   * the removal of the old one.
+   */
+  const read = async (key: string, held: boolean): Promise<Stored | undefined> => {
+    const stored = await load(key);
+    if (stored === undefined || stored.expiresAt === null || now() < stored.expiresAt)
+      return stored;
+    if (held) {
       await remove(key);
       return undefined;
     }
-    return parsed;
+    return lock(key, async () => {
+      const again = await load(key);
+      if (again === undefined) return undefined;
+      if (again.expiresAt !== null && now() >= again.expiresAt) {
+        await remove(key);
+        return undefined;
+      }
+      return again;
+    });
   };
 
   const write = async (key: string, text: string, expiresAt: number | null): Promise<void> => {
@@ -158,7 +186,7 @@ export function createFileKVStore(options: FileKVStoreOptions): KVStore {
   return {
     async get(key) {
       checkKey(key);
-      const stored = await read(key);
+      const stored = await read(key, false);
       return stored === undefined ? undefined : (JSON.parse(stored.text) as unknown);
     },
     async set(key, value, write_?: KVWriteOptions) {
@@ -196,8 +224,8 @@ export function createFileKVStore(options: FileKVStoreOptions): KVStore {
           if (isMissing(error)) continue;
           throw error;
         }
-        const parsed: unknown = JSON.parse(raw);
-        if (!isStored(parsed)) continue;
+        const parsed = parseStored(raw);
+        if (parsed === undefined) continue;
         if (parsed.expiresAt !== null && now() >= parsed.expiresAt) continue;
         if (!parsed.key.startsWith(prefix)) continue;
         if (page.cursor !== undefined && !(parsed.key > page.cursor)) continue;
@@ -213,7 +241,7 @@ export function createFileKVStore(options: FileKVStoreOptions): KVStore {
       if (typeof by !== "number" || !Number.isFinite(by))
         throw new TypeError("KVStore.increment: by must be a finite number.");
       return lock(key, async () => {
-        const current = await read(key);
+        const current = await read(key, true);
         let base = 0;
         let expiresAt: number | null = ttl === undefined ? null : now() + ttl * 1000;
         if (current !== undefined) {

@@ -108,7 +108,9 @@ export function parseCookies(header: string | null): Map<string, string> {
  */
 export function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
   if (!TOKEN.test(name))
-    throw new TypeError(`cookie name ${JSON.stringify(name)} is not a valid token.`);
+    throw new TypeError(
+      __DEV__ ? `cookie name ${JSON.stringify(name)} is not a valid token.` : "DUSK_COOKIE_5",
+    );
   const encoded = encodeURIComponent(value);
   if (name.length + encoded.length > COOKIE_LIMITS.maxNameValueLength) {
     throw new RangeError(
@@ -119,28 +121,34 @@ export function serializeCookie(name: string, value: string, options: CookieOpti
   const path = options.path ?? "/";
   const sameSite = options.sameSite ?? "lax";
   if (!PATH.test(path))
-    throw new TypeError("cookie path must start with / and contain no ; or controls.");
+    throw new TypeError(
+      __DEV__ ? "cookie path must start with / and contain no ; or controls." : "DUSK_COOKIE_6",
+    );
   if (
     options.domain !== undefined &&
     (options.domain.length > 253 || !DOMAIN.test(options.domain))
   ) {
-    throw new TypeError("cookie domain is not a valid host name.");
+    throw new TypeError(__DEV__ ? "cookie domain is not a valid host name." : "DUSK_COOKIE_1");
   }
   if (name.startsWith("__Host-") && (!secure || path !== "/" || options.domain !== undefined)) {
-    throw new TypeError("a __Host- cookie must be Secure, have Path=/ and no Domain.");
+    throw new TypeError(
+      __DEV__ ? "a __Host- cookie must be Secure, have Path=/ and no Domain." : "DUSK_COOKIE_3",
+    );
   }
   if (name.startsWith("__Secure-") && !secure)
-    throw new TypeError("a __Secure- cookie must be Secure.");
-  if (sameSite === "none" && !secure) throw new TypeError("SameSite=None requires Secure.");
+    throw new TypeError(__DEV__ ? "a __Secure- cookie must be Secure." : "DUSK_COOKIE_8");
+  if (sameSite === "none" && !secure)
+    throw new TypeError(__DEV__ ? "SameSite=None requires Secure." : "DUSK_COOKIE_7");
   const parts = [`${name}=${encoded}`, `Path=${path}`];
   if (options.domain !== undefined) parts.push(`Domain=${options.domain}`);
   if (options.maxAge !== undefined) {
-    if (!Number.isInteger(options.maxAge)) throw new TypeError("cookie maxAge must be an integer.");
+    if (!Number.isInteger(options.maxAge))
+      throw new TypeError(__DEV__ ? "cookie maxAge must be an integer." : "DUSK_COOKIE_4");
     parts.push(`Max-Age=${options.maxAge}`);
   }
   if (options.expires !== undefined) {
     if (Number.isNaN(options.expires.getTime()))
-      throw new TypeError("cookie expires is an invalid date.");
+      throw new TypeError(__DEV__ ? "cookie expires is an invalid date." : "DUSK_COOKIE_2");
     parts.push(`Expires=${options.expires.toUTCString()}`);
   }
   if (options.httpOnly ?? true) parts.push("HttpOnly");

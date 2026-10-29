@@ -11,19 +11,41 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 
-/** Every file below a folder, sorted, as absolute paths. A missing folder has none. @internal */
+/**
+ * Every file below a folder, as absolute paths, in the order a depth-first walk over sorted names gives (a folder's files
+ * come at the folder's place in the listing). A missing folder has none; any other failure to list a folder
+ * (permissions, a file where a folder should be) is thrown, because an id computed from a partial listing would not
+ * change with the code that was left out.
+ *
+ * The walk keeps its own stack: the depth of the folders is the project's, not ours.
+ * @internal
+ */
 async function filesBelow(dir: string): Promise<string[]> {
-  let entries: import("node:fs").Dirent[];
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
   const found: string[] = [];
-  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...(await filesBelow(path)));
-    else if (entry.isFile()) found.push(path);
+  const pending: Array<{ path: string; folder: boolean }> = [{ path: dir, folder: true }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (!next.folder) {
+      found.push(next.path);
+      continue;
+    }
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(next.path, { withFileTypes: true });
+    } catch (error) {
+      if (typeof error === "object" && error !== null && Reflect.get(error, "code") === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    // Pushed last to first, so the first entry is popped first.
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (entry === undefined) continue;
+      const path = join(next.path, entry.name);
+      if (entry.isDirectory()) pending.push({ path, folder: true });
+      else if (entry.isFile()) pending.push({ path, folder: false });
+    }
   }
   return found;
 }

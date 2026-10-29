@@ -56,6 +56,11 @@ const OPCODE_CLOSE = 0x8;
 const OPCODE_PING = 0x9;
 const OPCODE_PONG = 0xa;
 
+/** Fragments a message may have at least, whatever its size limit. */
+const MIN_FRAGMENTS = 1024;
+/** One fragment per this many bytes of the size limit is allowed (a client that cuts finer than this is not sending data). */
+const FRAGMENT_BYTES = 512;
+
 /** The size above which an emptied read buffer is released instead of kept for the next frame. */
 const RETAINED_BUFFER_BYTES = 64 * 1024;
 
@@ -250,6 +255,16 @@ export class FrameReader {
     this.#fragmentBytes += payload.byteLength;
     if (this.#fragmentBytes > this.#options.maxMessageBytes) {
       throw new WebSocketProtocolError(CLOSE.TOO_BIG, "message too big");
+    }
+    // The byte count alone does not bound the pieces: empty continuation frames add nothing to it, and each piece costs
+    // far more memory than the six bytes that carried it. The pieces are bounded by the size limit, so a message cut
+    // into very small fragments (or never ending) is refused.
+    const maxFragments = Math.max(
+      MIN_FRAGMENTS,
+      Math.ceil(this.#options.maxMessageBytes / FRAGMENT_BYTES),
+    );
+    if (this.#fragments.length >= maxFragments) {
+      throw new WebSocketProtocolError(CLOSE.TOO_BIG, "message has too many fragments");
     }
     this.#fragments.push(payload);
     if (!fin) return undefined;

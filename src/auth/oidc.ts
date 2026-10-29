@@ -19,6 +19,7 @@ import {
 } from "./http";
 import { createJwksCache, type JwksCache } from "./jwks";
 import {
+  decodeJwt,
   importHmacKey,
   isHmacAlgorithm,
   isSupportedAlgorithm,
@@ -116,6 +117,11 @@ export interface OidcClientOptions {
   readonly fetch?: typeof fetch;
   /** Time source in milliseconds. Default `Date.now`. */
   readonly now?: () => number;
+  /**
+   * Receives an error that does not stop the request: the refresh token could not be revoked at sign-out (the session ends
+   * anyway). Default: `console.error`. Route it to the `onError` of your handler or to your logger.
+   */
+  readonly report?: (error: unknown) => void;
 }
 
 /** Tokens the provider issued. @since 1.0.0 */
@@ -416,6 +422,9 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
     if (RESERVED_PARAMS.has(key)) throw configError(`authorizationParams cannot set ${key}.`);
   }
   const sessions = options.sessions;
+  const report =
+    options.report ??
+    ((error: unknown) => console.error("[dusk] OIDC: a request step failed", error));
   const now = options.now ?? Date.now;
   const userKey = options.sessionKey ?? "user";
   const tokensKey = `${userKey}:tokens`;
@@ -714,6 +723,23 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
     return claims;
   };
 
+  /** The subject this session belongs to: the stored user, else the `sub` of the ID token stored at sign-in. */
+  const subjectOfSession = async (
+    event: RequestEvent,
+    current: StoredTokens,
+  ): Promise<string | undefined> => {
+    const user = await client.user(event);
+    if (user !== undefined) return user.id;
+    if (current.idToken === undefined) return undefined;
+    try {
+      const sub = decodeJwt(current.idToken).payload["sub"];
+      return typeof sub === "string" && sub !== "" ? sub : undefined;
+    } catch (error) {
+      report(error);
+      return undefined;
+    }
+  };
+
   const readUserinfo = async (
     event: RequestEvent,
     resolved: Resolved,
@@ -971,11 +997,19 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
           );
           const next = toTokens(body, current);
           if (next.idToken !== undefined && !oauth2) {
-            const user = await client.user(event);
+            // The ID token of a refresh must be for the user of this session (OIDC Core 12.2). The subject comes from
+            // the stored user, else from the ID token stored at sign-in (verified then, kept server-side). With neither,
+            // the new token cannot be compared and is refused rather than accepted as whoever it names.
+            const expected = await subjectOfSession(event, current);
+            if (expected === undefined) {
+              throw invalidToken(
+                "The session has no subject to compare the refreshed ID token with; sign in again.",
+              );
+            }
             await validateIdToken(event, resolved, next.idToken, {
               nonce: undefined,
               accessToken: next.accessToken,
-              sub: user?.id,
+              sub: expected,
             });
           }
           const idToken = next.idToken ?? current.idToken;
@@ -1067,8 +1101,10 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
             headers: { "content-type": "application/x-www-form-urlencoded", ...clientAuth(values) },
             body: formBody(values),
           });
-        } catch {
-          // Best effort: the session ends whatever the provider answers, and the refresh token expires on its own.
+        } catch (error) {
+          // Best effort: the session ends whatever the provider answers, and the refresh token expires on its own. The
+          // failure is reported because a provider that never revokes leaves live refresh tokens behind.
+          report(error);
         }
       }
       session.destroy();

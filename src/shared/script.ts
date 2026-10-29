@@ -1,3 +1,5 @@
+import { hasControl } from "../internal/text";
+
 /**
  * Third-party and app scripts: where a script goes, when it runs, and the CSP nonce every script carries.
  * `scriptTag` returns the markup for the document head or body; `scriptsHtml` orders a list of them;
@@ -38,6 +40,12 @@ function attribute(value: string): string {
 }
 
 function checkSource(src: string): void {
+  // A browser drops tabs and line breaks from a URL before it reads it, so `/<TAB>/host` is `//host`.
+  if (hasControl(src)) {
+    throw new TypeError(
+      `scriptTag: the src ${JSON.stringify(src)} must not contain control characters.`,
+    );
+  }
   if (src.startsWith("/") && !src.startsWith("//") && !src.startsWith("/\\")) return;
   if (URL.canParse(src)) {
     const { protocol } = new URL(src);

@@ -37,13 +37,13 @@ function denoGlobal(): Pick<DenoRuntime, "serve"> {
     serve(options, handler) {
       const server: unknown = Reflect.apply(serve, deno, [options, handler]);
       if (typeof server !== "object" || server === null)
-        throw new Error("Deno.serve did not return a server");
+        throw new Error(__DEV__ ? "Deno.serve did not return a server" : "DUSK_DENO");
       const addr: unknown = Reflect.get(server, "addr");
       const shutdown: unknown = Reflect.get(server, "shutdown");
       const port: unknown =
         typeof addr === "object" && addr !== null ? Reflect.get(addr, "port") : undefined;
       if (typeof port !== "number" || typeof shutdown !== "function") {
-        throw new Error("Deno.serve returned an unexpected server");
+        throw new Error(__DEV__ ? "Deno.serve returned an unexpected server" : "DUSK_DENO");
       }
       return {
         addr: { port },

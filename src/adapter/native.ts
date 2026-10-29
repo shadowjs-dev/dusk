@@ -209,7 +209,7 @@ type NativeGate = (request: Request) => Promise<AssetDecision>;
 /** A file under `root` that the request names, or a response to send instead. */
 async function staticFor(
   root: string,
-  realRoot: Promise<string>,
+  realRoot: Promise<string | undefined>,
   request: Request,
   assetsDir: string,
   prefix: string | undefined,
@@ -235,6 +235,8 @@ async function staticFor(
   const page = pageFor(pages, pathname);
   if (page?.mode === "handler") return undefined;
   const base = await realRoot;
+  // A folder that cannot be resolved was reported at start-up: there are no static files, and the handler answers.
+  if (base === undefined) return undefined;
   // The path itself, then its directory index (`/` and `/about/`), then the clean-URL file (`/about` is `about.html`).
   // A prerendered page is found this way: `about/index.html` for `/about`, `index.html` for `/`.
   const candidates: string[][] = [segments, [...segments, "index.html"]];
@@ -280,6 +282,7 @@ async function staticFor(
     ...(COMPRESSIBLE.test(contentTypeOf(relative)) ? { vary: "Accept-Encoding" } : {}),
     "content-length": String(info.size),
     "last-modified": info.mtime.toUTCString(),
+    "accept-ranges": "bytes",
     etag,
     "x-content-type-options": "nosniff",
     "cache-control": defaultImmutable(relative, assetsDir)
@@ -304,6 +307,18 @@ async function staticFor(
     condition?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag.replace(/^W\//, ""))
   ) {
     return new Response(null, { status: 304, headers });
+  }
+  // The same reading of `Range` and `If-Range` as the Node server, loaded only for a request that has a `Range`
+  // (these files are served as they are, never encoded).
+  if (request.headers.has("range")) {
+    const ranged = (await import("./native-range")).rangedResponse(
+      request,
+      headers,
+      etag,
+      info,
+      real,
+    );
+    if (ranged !== undefined) return ranged;
   }
   if (request.method === "HEAD") return new Response(null, { status: 200, headers });
   const body = Readable.toWeb(createReadStream(real)) as unknown as ReadableStream<Uint8Array>;
@@ -333,8 +348,16 @@ export function createNativeFetch(
 ): (request: Request, clientAddress: string | undefined) => Promise<Response> {
   const root = options.static === false ? undefined : resolve(options.static);
   const pages = new Map((options.pages ?? []).map((page) => [page.path, page] as const));
-  // The real path of the folder is resolved once, when the server starts.
-  const realRoot = root === undefined ? undefined : realpath(root);
+  // The real path of the folder is resolved once, when the server starts. A folder that is missing or unreadable is
+  // reported once, here (an unattended rejection would end the process on Bun and Deno), and then serves nothing: the
+  // requests go to the handler, as they do on the Node server.
+  const realRoot =
+    root === undefined
+      ? undefined
+      : realpath(root).catch((error: unknown): undefined => {
+          options.onError(error);
+          return undefined;
+        });
   const assetsDir = options.assetsDir ?? "assets";
   // The handler's host list (`security.allowedHosts`), the same predicate the handler applies to `url.host`. A refused
   // Host is not answered from the folder: the handler answers its own 400, for a file and a missing path alike.
@@ -424,7 +447,9 @@ export async function startNative(
   const hostname = options.hostname ?? "127.0.0.1";
   const port = options.port ?? defaultPort();
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new RangeError(`serve: port must be an integer from 0 to 65535 (got ${port})`);
+    throw new RangeError(
+      __DEV__ ? `serve: port must be an integer from 0 to 65535 (got ${port})` : "DUSK_PORT",
+    );
   }
   const reportFailure =
     options.onError ??

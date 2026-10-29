@@ -31,5 +31,5 @@ export function sendEarlyHints(rt: PageRuntime, event: EventState): void {
     ?.split(", ")
     .filter((link) => link.startsWith("</"))
     .slice(0, 8);
-  if (links?.length) host.earlyHints(links);
+  if (links !== undefined && links.length > 0) host.earlyHints(links);
 }

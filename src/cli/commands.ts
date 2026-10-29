@@ -64,6 +64,10 @@ const WORKERS_OPTION: OptionHelp = {
   flag: "--workers <n|auto>",
   text: "Run n server processes that share the port (auto: one per core, at most 16). Default: DUSK_WORKERS, then 1. SIGUSR2 replaces them one by one.",
 };
+const DIR_OPTION: OptionHelp = {
+  flag: "--dir <folder>",
+  text: "The build folder to serve. Default: the folder the last `dusk build` wrote (dusk({ outDir })), then dist.",
+};
 const STREAM_JSON_OPTION: OptionHelp = {
   flag: "--json",
   text: "Print JSON Lines on stdout, one event per line (ready, request, stopped), and nothing else there.",
@@ -151,10 +155,12 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "start",
     run: "start",
-    summary: "Serve the production build in dist/ with the Node adapter. Run `dusk build` first.",
+    summary:
+      "Serve the production build (dist/ unless dusk({ outDir }) says otherwise) with the Node adapter. Run `dusk build` first.",
     options: [
       ...SERVING_OPTIONS("0.0.0.0").slice(0, -1),
       WORKERS_OPTION,
+      DIR_OPTION,
       LOG_OPTION,
       STREAM_JSON_OPTION,
       HELP_FLAG,
@@ -163,9 +169,15 @@ export const COMMANDS: readonly CommandSpec[] = [
       "dusk start                 Serve the build on port 3000.",
       "dusk start -p 8080 --log   Serve on port 8080 and print each request.",
       "dusk start --workers auto  Serve with one process per core.",
+      "dusk start --dir out       Serve the build in out/ (not needed after `dusk build`, which records its folder).",
       "dusk start --json          Print JSON Lines: a ready line with the url, then one line per request with --log.",
     ],
-    parse: { ...SERVING_PARSE, log: { type: "boolean" }, workers: { type: "string" } },
+    parse: {
+      ...SERVING_PARSE,
+      log: { type: "boolean" },
+      workers: { type: "string" },
+      dir: { type: "string" },
+    },
     takesHost: true,
   },
   {
@@ -213,12 +225,18 @@ export const COMMANDS: readonly CommandSpec[] = [
     options: [
       ...SERVING_OPTIONS("0.0.0.0").slice(0, -1),
       WORKERS_OPTION,
+      DIR_OPTION,
       LOG_OPTION,
       STREAM_JSON_OPTION,
       HELP_FLAG,
     ],
     examples: ["dusk preview -p 4173   Look at the production build on port 4173."],
-    parse: { ...SERVING_PARSE, log: { type: "boolean" }, workers: { type: "string" } },
+    parse: {
+      ...SERVING_PARSE,
+      log: { type: "boolean" },
+      workers: { type: "string" },
+      dir: { type: "string" },
+    },
     takesHost: true,
   },
 ];

@@ -35,18 +35,64 @@ export interface ServiceWorkerUpdate {
   update(): void;
 }
 
-let tracked: ServiceWorkerRegistration | undefined;
-let isWaiting = false;
-let applying = false;
-const listeners = new Set<() => void>();
+/** How long `update()` waits for the new worker to take control before it lets the page try again. */
+const APPLY_TIMEOUT_MS = 10_000;
 
-function publish(next: boolean): void {
-  if (next === isWaiting) return;
-  isWaiting = next;
-  for (const listener of [...listeners]) listener();
+/**
+ * What the page knows about updates. It belongs to the page's `ServiceWorkerContainer` (one per window), held in a
+ * `WeakMap`, so two pages of one test run, or a page that is torn down, never share a stale "waiting" flag.
+ */
+interface UpdateState {
+  tracked: ServiceWorkerRegistration | undefined;
+  waiting: boolean;
+  applying: boolean;
+  readonly listeners: Set<() => void>;
+  readonly followed: WeakSet<ServiceWorkerRegistration>;
+  /** Drops the `controllerchange` listener and the timeout of an `update()` that is in flight. */
+  cancelApply: (() => void) | undefined;
+}
+
+const states = new WeakMap<ServiceWorkerContainer, UpdateState>();
+
+function containerOf(): ServiceWorkerContainer | undefined {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return undefined;
+  return navigator.serviceWorker;
+}
+
+function stateOf(container: ServiceWorkerContainer): UpdateState {
+  let state = states.get(container);
+  if (state === undefined) {
+    state = {
+      tracked: undefined,
+      waiting: false,
+      applying: false,
+      listeners: new Set(),
+      followed: new WeakSet(),
+      cancelApply: undefined,
+    };
+    states.set(container, state);
+  }
+  return state;
+}
+
+function publish(state: UpdateState, next: boolean): void {
+  if (next === state.waiting) return;
+  state.waiting = next;
+  for (const listener of [...state.listeners]) listener();
+}
+
+/** Ends an `update()` that did not finish, so a later `update()` can try again. */
+function resetApplying(state: UpdateState): void {
+  state.cancelApply?.();
+  state.cancelApply = undefined;
+  state.applying = false;
 }
 
 function subscribe(notify: () => void): () => void {
+  const container = containerOf();
+  // No service workers here (the server, an old browser): nothing to follow, nothing to release.
+  if (container === undefined) return () => undefined;
+  const { listeners } = stateOf(container);
   listeners.add(notify);
   return () => {
     listeners.delete(notify);
@@ -54,12 +100,25 @@ function subscribe(notify: () => void): () => void {
 }
 
 /** Follows a registration: a worker that finishes installing while another one controls the page is an update. */
-function track(registration: ServiceWorkerRegistration): void {
-  tracked = registration;
-  const sync = (): void => publish(registration.waiting !== null);
-  registration.addEventListener("updatefound", () => {
-    registration.installing?.addEventListener("statechange", sync);
-  });
+function track(container: ServiceWorkerContainer, registration: ServiceWorkerRegistration): void {
+  const state = stateOf(container);
+  state.tracked = registration;
+  const sync = (event?: Event): void => {
+    const waiting = registration.waiting !== null;
+    // A worker that was replaced or discarded (`redundant`) can no longer be applied: let the page try again. One that
+    // leaves `waiting` by activating is the update going through, and its `controllerchange` (the reload) comes next.
+    const from = event?.target;
+    if (from !== null && from !== undefined && Reflect.get(from, "state") === "redundant")
+      resetApplying(state);
+    publish(state, waiting);
+  };
+  // Registering twice returns the same registration; listening twice would run `sync` twice per event.
+  if (!state.followed.has(registration)) {
+    state.followed.add(registration);
+    registration.addEventListener("updatefound", () => {
+      registration.installing?.addEventListener("statechange", sync);
+    });
+  }
   sync();
 }
 
@@ -117,7 +176,7 @@ export async function registerServiceWorker(
     scope,
     updateViaCache: "none",
   });
-  track(registration);
+  track(navigator.serviceWorker, registration);
   return registration;
 }
 
@@ -143,20 +202,40 @@ export async function unregisterServiceWorker(cacheNamePrefix = "dusk"): Promise
         .map((name) => caches.delete(name)),
     );
   }
-  tracked = undefined;
-  publish(false);
+  const container = navigator.serviceWorker;
+  const state = stateOf(container);
+  state.tracked = undefined;
+  resetApplying(state);
+  publish(state, false);
   return results.some(Boolean);
 }
 
 function applyUpdate(): void {
-  const worker = tracked?.waiting;
-  if (worker === null || worker === undefined || applying) return;
-  applying = true;
+  const container = containerOf();
+  if (container === undefined) return;
+  const state = stateOf(container);
+  const worker = state.tracked?.waiting;
+  if (worker === null || worker === undefined || state.applying) return;
+  state.applying = true;
   // The page reloads once, when the new worker controls it, so the markup and the cached assets are one version.
-  navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), {
-    once: true,
-  });
-  worker.postMessage({ type: SKIP_WAITING });
+  const onChange = (): void => {
+    resetApplying(state);
+    location.reload();
+  };
+  container.addEventListener("controllerchange", onChange, { once: true });
+  // `controllerchange` never fires when the worker ignores the message or was discarded meanwhile; without this the
+  // page would stay "applying" and every later `update()` would do nothing.
+  const timer = setTimeout(() => resetApplying(state), APPLY_TIMEOUT_MS);
+  state.cancelApply = () => {
+    clearTimeout(timer);
+    container.removeEventListener("controllerchange", onChange);
+  };
+  try {
+    worker.postMessage({ type: SKIP_WAITING });
+  } catch (error) {
+    resetApplying(state);
+    throw error;
+  }
 }
 
 /**
@@ -178,6 +257,13 @@ function applyUpdate(): void {
  * @since 1.0.0
  */
 export function useServiceWorkerUpdate(): ServiceWorkerUpdate {
-  const waiting = useExternalStore(subscribe, () => isWaiting, { getServerSnapshot: () => false });
+  const waiting = useExternalStore(
+    subscribe,
+    () => {
+      const container = containerOf();
+      return container !== undefined && stateOf(container).waiting;
+    },
+    { getServerSnapshot: () => false },
+  );
   return { waiting, update: applyUpdate };
 }

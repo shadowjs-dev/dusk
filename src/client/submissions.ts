@@ -258,12 +258,16 @@ export function createSubmissionStore(options: SubmissionStoreOptions = {}): Sub
     setEntries(() => kept);
   };
 
+  // Several submissions can finish together, each starting a revalidation: the page is `loading` until the last ends.
+  let revalidations = 0;
   const revalidate = async (): Promise<void> => {
+    revalidations += 1;
     setRevalidating(() => true);
     try {
       await options.onRevalidate?.();
     } finally {
-      setRevalidating(() => false);
+      revalidations -= 1;
+      setRevalidating(() => revalidations > 0);
     }
   };
 

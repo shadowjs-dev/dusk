@@ -37,37 +37,80 @@ const STRATEGIES: ReadonlySet<string> = new Set([
 /** The largest props attribute, in characters; a larger one should be fetched by the island itself. */
 const MAX_PROPS_CHARS = 16 * 1024;
 
-/** The JSON of plain data, with the characters that could end a script or an attribute written as escapes. */
-function propsJson(props: Readonly<Record<string, unknown>>): string {
-  const seen = new Set<object>();
-  const check = (value: unknown, path: string): void => {
-    if (value === null || typeof value === "string" || typeof value === "boolean") return;
+/** One object or array being checked: its own keys (undefined for an array), how many children it has, and the next one. */
+interface Frame {
+  readonly value: object;
+  readonly keys: readonly string[] | undefined;
+  readonly length: number;
+  next: number;
+}
+
+/**
+ * Throws unless `props` is plain data. Iterative: the depth of props is the caller's, so a deep structure must not
+ * overflow the stack. Anything nested deeper than half the size limit cannot fit in it (a level costs two characters
+ * at least), so it is the same RangeError as an oversize text, raised before the walk gets that far.
+ */
+function checkPlainData(props: Readonly<Record<string, unknown>>): void {
+  const ancestors = new Set<object>();
+  const stack: Frame[] = [];
+  const segments: string[] = [];
+  const enter = (value: unknown, segment: string): void => {
+    segments.push(segment);
+    const path = (): string => segments.join("");
+    if (value === null || typeof value === "string" || typeof value === "boolean") {
+      segments.pop();
+      return;
+    }
     if (typeof value === "number") {
       if (!Number.isFinite(value))
-        throw new TypeError(`island props: ${path} is not a finite number.`);
+        throw new TypeError(`island props: ${path()} is not a finite number.`);
+      segments.pop();
       return;
     }
     if (typeof value !== "object") {
       throw new TypeError(
-        `island props: ${path} is a ${typeof value}; only plain data can be a prop.`,
+        `island props: ${path()} is a ${typeof value}; only plain data can be a prop.`,
       );
     }
-    if (seen.has(value)) throw new TypeError(`island props: ${path} is a cycle.`);
-    seen.add(value);
-    if (Array.isArray(value)) {
-      for (const [index, item] of value.entries()) check(item, `${path}[${index}]`);
-    } else {
-      const proto: unknown = Object.getPrototypeOf(value);
-      if (proto !== Object.prototype && proto !== null) {
-        throw new TypeError(
-          `island props: ${path} is an instance of a class; only plain objects can be props.`,
-        );
-      }
-      for (const key of Object.keys(value)) check(Reflect.get(value, key), `${path}.${key}`);
+    if (ancestors.has(value)) throw new TypeError(`island props: ${path()} is a cycle.`);
+    if (stack.length >= MAX_PROPS_CHARS / 2) {
+      throw new RangeError(
+        `island props: the props are nested deeper than the ${MAX_PROPS_CHARS} character limit allows.`,
+      );
     }
-    seen.delete(value);
+    ancestors.add(value);
+    if (Array.isArray(value)) {
+      stack.push({ value, keys: undefined, length: value.length, next: 0 });
+      return;
+    }
+    const proto: unknown = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new TypeError(
+        `island props: ${path()} is an instance of a class; only plain objects can be props.`,
+      );
+    }
+    const keys = Object.keys(value);
+    stack.push({ value, keys, length: keys.length, next: 0 });
   };
-  check(props, "props");
+  enter(props, "props");
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame === undefined) break;
+    if (frame.next === frame.length) {
+      ancestors.delete(frame.value);
+      stack.pop();
+      segments.pop();
+      continue;
+    }
+    const index = frame.next++;
+    const key = frame.keys?.[index];
+    enter(Reflect.get(frame.value, key ?? index), key === undefined ? `[${index}]` : `.${key}`);
+  }
+}
+
+/** The JSON of plain data, with the characters that could end a script or an attribute written as escapes. */
+function propsJson(props: Readonly<Record<string, unknown>>): string {
+  checkPlainData(props);
   const text = JSON.stringify(props).replace(
     /[<>&\u2028\u2029]/g,
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,

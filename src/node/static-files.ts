@@ -6,6 +6,7 @@ import { pipeline } from "node:stream";
 import { assertKnownOptions } from "../internal/known-options";
 import { secureHeaderEntries } from "../server/secure-headers";
 import type { AssetDecision } from "../server/types";
+import { selectRange } from "../shared/byte-range";
 import { pageKeyOf, type StaticPage } from "../shared/static-page";
 import { type Compressor, type Encoding, isCompressible, negotiateEncoding } from "./compress";
 
@@ -63,6 +64,8 @@ export function isAllowedWellKnown(segments: readonly string[], names: readonly 
     segments.length === 2 && segments[0] === ".well-known" && names.includes(segments[1] ?? "")
   );
 }
+
+export { ifRangeMatches, parseRange, selectRange } from "../shared/byte-range";
 
 /** What the static server needs from its host. @internal */
 export interface StaticContext {
@@ -204,30 +207,6 @@ const SIBLINGS: Readonly<Record<Encoding, string>> = { br: ".br", zstd: ".zst", 
 /** The weak entity tag of a file. */
 function etagOf(stats: Stats, suffix: string): string {
   return `W/"${stats.size.toString(16)}-${Math.floor(stats.mtimeMs).toString(16)}${suffix}"`;
-}
-
-/** Parses a single `bytes=` range. Returns `null` when it is not a single valid range, `"unsatisfiable"` when it is outside the file. */
-function parseRange(
-  header: string,
-  size: number,
-): { start: number; end: number } | "unsatisfiable" | null {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-  if (match === null) return null;
-  const [, first = "", last = ""] = match;
-  if (first === "" && last === "") return null;
-  let start: number;
-  let end: number;
-  if (first === "") {
-    const suffix = Number(last);
-    if (suffix === 0) return "unsatisfiable";
-    start = Math.max(0, size - suffix);
-    end = size - 1;
-  } else {
-    start = Number(first);
-    end = last === "" ? size - 1 : Math.min(Number(last), size - 1);
-  }
-  if (start >= size || start > end) return "unsatisfiable";
-  return { start, end };
 }
 
 /** Whether any entity tag of an `If-None-Match` list matches (weak comparison). */
@@ -465,21 +444,23 @@ export function createStaticServer(options: StaticOptions): StaticServer {
     const size = source.stats.size;
     // Ranges apply to the identity representation only.
     let range: { start: number; end: number } | undefined;
-    const rangeHeader = req.headers.range;
-    const ifRange = req.headers["if-range"];
-    const rangeAllowed =
-      source.encoding === undefined &&
-      typeof rangeHeader === "string" &&
-      (typeof ifRange !== "string" || ifRange === etag || ifRange === headers["last-modified"]);
-    if (rangeAllowed) {
-      const parsed = parseRange(rangeHeader, size);
-      if (parsed === "unsatisfiable") {
-        res.writeHead(416, { ...headers, "content-range": `bytes */${size}` });
-        res.end();
-        return;
-      }
-      if (parsed !== null) range = parsed;
+    const selected =
+      source.encoding === undefined
+        ? selectRange(
+            req.headers.range,
+            typeof req.headers["if-range"] === "string" ? req.headers["if-range"] : undefined,
+            etag,
+            file.stats.mtimeMs,
+            size,
+            Date.now(),
+          )
+        : null;
+    if (selected === "unsatisfiable") {
+      res.writeHead(416, { ...headers, "content-range": `bytes */${size}` });
+      res.end();
+      return;
     }
+    if (selected !== null) range = selected;
 
     // Compress on the fly when nothing precompressed exists, within the concurrency bound.
     const compressor = context.compressor;

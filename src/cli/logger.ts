@@ -24,6 +24,13 @@ export interface DuskLoggerOptions {
 }
 
 /**
+ * Most messages `warnOnce` remembers. A dev server runs for days and a message may carry a file name, so the memory is
+ * bounded: past this many, the oldest is forgotten (it may be shown once more).
+ * @since 1.0.0
+ */
+export const WARN_ONCE_LIMIT = 1000;
+
+/**
  * A Vite logger that prints in Dusk's words.
  * @param options How to print.
  * @returns The logger, for `customLogger` of a Vite config.
@@ -63,6 +70,13 @@ export function duskLogger(options: DuskLoggerOptions): Logger {
     warnOnce(message: string, logOptions?: LogOptions): void {
       if (once.has(message)) return;
       once.add(message);
+      if (once.size > WARN_ONCE_LIMIT) {
+        // A Set iterates in insertion order: the first value is the oldest.
+        for (const oldest of once) {
+          once.delete(oldest);
+          break;
+        }
+      }
       warned = true;
       emit("warn", message, logOptions?.timestamp);
     },

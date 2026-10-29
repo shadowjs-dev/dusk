@@ -40,6 +40,8 @@ export function assertKnownOptions(
   if (typeof options !== "object" || options === null) return;
   for (const key of Object.keys(options)) {
     if (known.has(key)) continue;
+    // The hint and the list of names are for the developer who mistyped; a production build keeps the name only.
+    if (!__DEV__) throw new TypeError(`${where}: unknown option "${key}"`);
     const hint = closest(key, known);
     const suggestion = hint === undefined ? "." : `. Did you mean "${hint}"?`;
     throw new TypeError(

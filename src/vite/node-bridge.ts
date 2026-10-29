@@ -42,10 +42,14 @@ export function toWebRequest(
   const host = req.headers.host;
   if (host === undefined || host === "") throw new BadRequestError("missing Host header");
   const target = req.originalUrl ?? req.url ?? "/";
-  if (!URL.canParse(target, `${options.protocol}://${host}`)) {
+  const origin = `${options.protocol}://${host}`;
+  // An origin-form target (`/path?query`) is appended to the origin, never resolved against it: resolving makes a target
+  // such as `//evil.example/x` another host. This is how the production bridge builds the URL too.
+  const href = target.startsWith("/") ? `${origin}${target}` : undefined;
+  if (href === undefined ? !URL.canParse(target, origin) : !URL.canParse(href)) {
     throw new BadRequestError("invalid request URL");
   }
-  const url = new URL(target, `${options.protocol}://${host}`);
+  const url = href === undefined ? new URL(target, origin) : new URL(href);
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
     if (value === undefined || name.startsWith(":")) continue;

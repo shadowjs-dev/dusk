@@ -59,7 +59,7 @@ export interface BuiltManifest {
 }
 
 const NOT_A_MANIFEST =
-  "dist/dusk-manifest.json is not a manifest the build wrote. Run `dusk build` again.";
+  "dusk-manifest.json is not a manifest the build wrote. Run `dusk build` again.";
 
 function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return isRecord(value) ? value : undefined;

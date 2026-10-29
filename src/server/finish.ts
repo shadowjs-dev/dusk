@@ -46,6 +46,19 @@ function generatedWanted(event: EventState, headers: Headers, cacheEtag: boolean
 }
 
 /**
+ * Whether a header of the answer carries this request's nonce (the `Content-Security-Policy` of a handler with a nonce).
+ * A 304 keeps the browser's stored body, whose nonces are the ones of the response that filled its cache, and updates its
+ * stored headers with these: the stored scripts would no longer match the policy. A cached page keeps one entity tag
+ * across nonces (the tag is of the body as it was rendered), so such an answer must be sent whole.
+ */
+function headersCarryNonce(event: EventState, headers: Headers): boolean {
+  const nonce = event.nonce;
+  if (nonce === undefined) return false;
+  for (const [, value] of headers) if (value.includes(nonce)) return true;
+  return false;
+}
+
+/**
  * Finishes an answer: the entity tags, then the `Response` the client gets. A generated tag is set in `headers` and the body
  * is read to compute it. A GET or HEAD whose `If-None-Match` matches the answer's ETag (its own, or the generated one) gets
  * a 304 with no body, unless the route opted out (`event.etag(false)`). The cookies the request set are added last, and a
@@ -107,6 +120,7 @@ async function tagStep(
     etag !== null &&
     condition !== null &&
     event.etagPolicy !== false &&
+    !headersCarryNonce(event, headers) &&
     etagMatches(condition, etag)
   ) {
     // A body read for a generated tag is consumed; any other body is released unread.

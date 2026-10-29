@@ -52,4 +52,49 @@ describe("islandAttributes", () => {
     );
     expect(() => islandAttributes({ id: "x", client: "media" })).toThrow(TypeError);
   });
+
+  it("[DUSK-R5-1] props nested 100,000 deep are refused with the size-limit RangeError, not a stack overflow; cycles and bad values are still named", () => {
+    let deep: Record<string, unknown> = {};
+    const root = deep;
+    for (let level = 0; level < 100_000; level++) {
+      const next: Record<string, unknown> = {};
+      deep["a"] = next;
+      deep = next;
+    }
+    const thrown = (() => {
+      try {
+        islandAttributes({ id: "x", props: root });
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(thrown).toBeInstanceOf(RangeError);
+    expect(String((thrown as Error).message)).toMatch(
+      /nested deeper than the 16384 character limit/,
+    );
+    // 4,000 levels are inside the limit and still work, as arrays or as objects.
+    let ok: unknown[] = [];
+    const okRoot = ok;
+    for (let level = 0; level < 4_000; level++) {
+      const next: unknown[] = [];
+      ok.push(next);
+      ok = next;
+    }
+    expect(islandAttributes({ id: "x", props: { list: okRoot } })["data-props"]).toMatch(
+      /^\{"list":\[\[/,
+    );
+    const cycle: unknown[] = [];
+    cycle.push([cycle]);
+    expect(() => islandAttributes({ id: "x", props: { list: cycle } })).toThrow(
+      /props\.list\[0\]\[0\] is a cycle/,
+    );
+    expect(() => islandAttributes({ id: "x", props: { a: { b: [1, { c: () => 1 }] } } })).toThrow(
+      /props\.a\.b\[1\]\.c is a function/,
+    );
+    const shared = { n: 1 };
+    expect(islandAttributes({ id: "x", props: { a: shared, b: shared } })["data-props"]).toBe(
+      '{"a":{"n":1},"b":{"n":1}}',
+    );
+  });
 });

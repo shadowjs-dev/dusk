@@ -188,8 +188,23 @@ export function errorPageHtml(
 }
 
 /**
- * A redirect response with an empty body. Characters outside printable ASCII in `location` are
- * percent-encoded, so no value can fail header validation or split a header.
+ * A `Location` value that is safe to put in a header: characters outside printable ASCII are percent-encoded, so no
+ * value can fail header validation or split a header. The pattern reads code points (`u`), so an emoji is one character
+ * and not two halves. A half of a surrogate pair (a decoded query can hold one) becomes U+FFFD first
+ * (`toWellFormed`), because `encodeURIComponent` throws on it and that would turn a redirect into a crash.
+ *
+ * @param location A target already checked by `checkRedirectTarget`.
+ * @returns The header value.
+ * @internal
+ */
+export function encodeLocation(location: string): string {
+  // `toWellFormed` is ES2024 (Node 20, Bun, Deno and Workers have it); the project's `lib` does not list it yet.
+  const wellFormed = (location as string & { toWellFormed(): string }).toWellFormed();
+  return wellFormed.replace(/[^\x21-\x7e]/gu, encodeURIComponent);
+}
+
+/**
+ * A redirect response with an empty body (see {@link encodeLocation} for the `Location` value).
  *
  * @param location A target already checked by `checkRedirectTarget`.
  * @param status 301, 302, 303, 307 or 308.
@@ -197,9 +212,8 @@ export function errorPageHtml(
  * @internal
  */
 export function redirectResponse(location: string, status: number): Response {
-  const encoded = location.replace(/[^\x21-\x7e]/g, (char) => encodeURIComponent(char));
   return new Response(null, {
     status,
-    headers: { location: encoded, "cache-control": "no-store" },
+    headers: { location: encodeLocation(location), "cache-control": "no-store" },
   });
 }

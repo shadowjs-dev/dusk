@@ -1,13 +1,13 @@
 import type { Stats } from "node:fs";
 import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { NODE_DEFAULT_HOST, NODE_DEFAULT_PORT } from "../node/adapter";
 import { type ServerHandle, serve } from "../node/serve";
 import { parseWorkers, resolveWorkerCount, WORKERS_ENV } from "../node/worker-count";
 import type { Handler } from "../server/types";
 import { workerInfo } from "../shared/worker-info";
-import { BUILD_DIR } from "./build";
+import { resolveBuildDir } from "./build-dir";
 import { CliError, isErrorCode } from "./errors";
 import { jsonSuccess, jsonTerminal, writeJson } from "./json";
 import { readBuildManifest } from "./manifest";
@@ -30,38 +30,39 @@ import { duskVersion } from "./version";
 
 /**
  * `dusk start` (and `dusk preview`): serves the production build with the Node adapter, the same way the generated
- * `server.mjs` does: the handler of `dist/server/entry.js`, the static files of `dist/client`, and the port and host
+ * `server.mjs` does: the handler of `<build folder>/server/entry.js`, the static files of `<build folder>/client`, and the port and host
  * of the flags, then `PORT` and `HOST`, then the adapter's defaults. The config is not evaluated; the build's manifest
  * says which adapter it used.
  *
  * @packageDocumentation
  */
 
-const ENTRY = join(BUILD_DIR, "server", "entry.js");
-
 /**
  * Starts the production server and runs until it is stopped. With `--json`, stdout carries JSON Lines and nothing else: a
  * `ready` line (`url`, `urls`, `port`, `host`, `mode`, `version`, `adapter`, `environments`, `readyMs`), a `request`
  * line for each request with `--log`, and a `stopped` line after a clean stop. The words go to stderr.
  * @param flags The parsed flags.
+ * @param root The app's folder. Default: the working folder.
  * @returns 0 after a clean stop.
  * @throws CliError when there is no build, the build used another adapter, or the port is taken.
  * @since 1.0.0
  */
-export async function runStart(flags: RunFlags): Promise<number> {
+export async function runStart(flags: RunFlags, root: string = process.cwd()): Promise<number> {
   const started = performance.now();
-  const root = process.cwd();
   const version = duskVersion();
   const json = flags.json;
   const term = json ? jsonTerminal() : currentTerminal();
-  const clientDir = join(root, BUILD_DIR, "client");
-  const manifest = await readBuildManifest(join(root, BUILD_DIR, "dusk-manifest.json"));
-  if (
-    manifest === undefined ||
-    !(await isDirectory(clientDir)) ||
-    !(await isFile(join(root, ENTRY)))
-  ) {
-    throw new CliError("no build found in dist. Run `dusk build` first.", "DUSK_NO_BUILD");
+  // `--dir`, else the folder the last `dusk build` recorded (`dusk({ outDir })`), else `dist`. The config is not evaluated.
+  const buildDir = await resolveBuildDir(root, flags.dir);
+  const clientDir = join(buildDir, "client");
+  const entry = join(buildDir, "server", "entry.js");
+  const manifest = await readBuildManifest(join(buildDir, "dusk-manifest.json"));
+  if (manifest === undefined || !(await isDirectory(clientDir)) || !(await isFile(entry))) {
+    const shown = relative(root, buildDir).split(sep).join("/");
+    throw new CliError(
+      `no build found in ${shown === "" ? "." : shown}. Run \`dusk build\` first.`,
+      "DUSK_NO_BUILD",
+    );
   }
   const adapter = manifest.adapter;
   if (adapter === undefined) {
@@ -108,7 +109,7 @@ export async function runStart(flags: RunFlags): Promise<number> {
     });
   }
 
-  const built = handlerOf(await import(pathToFileURL(join(root, ENTRY)).href));
+  const built = handlerOf(await import(pathToFileURL(entry).href), entry);
   const handler = flags.log
     ? withRequestLog(
         built,
@@ -362,12 +363,12 @@ function withRequestLog(handler: Handler, report: (request: RequestFacts) => voi
  * The handler the built entry exports.
  * @internal
  */
-function handlerOf(module: unknown): Handler {
+function handlerOf(module: unknown, entry: string): Handler {
   const candidate =
     typeof module === "object" && module !== null ? Reflect.get(module, "handler") : undefined;
   if (!isHandler(candidate)) {
     throw new CliError(
-      `${ENTRY} does not export a handler. Run \`dusk build\` again.`,
+      `${entry} does not export a handler. Run \`dusk build\` again.`,
       "DUSK_BAD_BUILD",
     );
   }

@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { writeBuildMarker } from "./build-dir";
 import { summarizeBuild } from "./build-summary";
 import { CliError, markBuildFailure } from "./errors";
 import { jsonFailure, jsonSuccess, jsonTerminal, writeJson } from "./json";
@@ -22,6 +23,40 @@ import { duskVersion } from "./version";
 
 /** The output folder of the build, relative to the app (the plugin's default `outDir`). @internal */
 export const BUILD_DIR = "dist";
+
+/**
+ * The folder the build wrote to: the parent of the client build's output folder (the plugin writes `<outDir>/client` and
+ * `<outDir>/server`), so an app that sets `dusk({ outDir })` is read from where its build went, not from `dist`.
+ *
+ * @param config The resolved Vite config of the builder.
+ * @returns The absolute output folder.
+ * @example buildDirOf({ root: "/app", environments: { client: { build: { outDir: "/app/out/client" } } } }); // "/app/out"
+ * @internal
+ * @since 1.0.0
+ */
+export function buildDirOf(config: {
+  readonly root: string;
+  readonly environments: Readonly<Record<string, { readonly build: { readonly outDir: string } }>>;
+}): string {
+  const client = config.environments["client"]?.build.outDir;
+  return client === undefined
+    ? join(config.root, BUILD_DIR)
+    : dirname(resolve(config.root, client));
+}
+
+/**
+ * The build folder as the summary names it: relative to the app, with `/` separators.
+ *
+ * @param root The app's folder.
+ * @param dir The absolute build folder.
+ * @returns For example `dist` or `build/out`.
+ * @example buildDirLabel("/app", "/app/build/out"); // "build/out"
+ * @internal
+ * @since 1.0.0
+ */
+export function buildDirLabel(root: string, dir: string): string {
+  return relative(root, dir).split(sep).join("/");
+}
 
 /**
  * Builds the app in the working folder and prints the summary.
@@ -64,14 +99,25 @@ export async function runBuild(flags: Pick<RunFlags, "json">): Promise<number> {
     }
     const ms = performance.now() - started;
     spinner?.stop();
-    const manifest = await readBuildManifest(join(root, BUILD_DIR, "dusk-manifest.json"));
+    const outDir = buildDirOf(builder.config);
+    // `dusk start` does not read the config: it finds the folder through this marker. A marker that cannot be written is
+    // said aloud, because `dusk start` would then look in the wrong folder.
+    try {
+      await writeBuildMarker(root, outDir);
+    } catch (error) {
+      builder.config.logger.warn(
+        `dusk: could not record the build folder for \`dusk start\` (${error instanceof Error ? error.message : String(error)}). Pass --dir to \`dusk start\`.`,
+      );
+    }
+    const manifest = await readBuildManifest(join(outDir, "dusk-manifest.json"));
     if (manifest === undefined)
       throw new CliError("the build wrote no manifest. Run `dusk build` again.", "DUSK_BAD_BUILD");
     const api = duskApiOf(builder.config.plugins);
     const summary = await summarizeBuild({
       version,
       manifest,
-      clientDir: join(root, BUILD_DIR, "client"),
+      clientDir: join(outDir, "client"),
+      outDir: buildDirLabel(root, outDir),
       report: api?.buildReport,
       budgets: api?.buildBudgets,
       ms,

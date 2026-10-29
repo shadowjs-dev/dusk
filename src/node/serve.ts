@@ -590,6 +590,7 @@ export async function serve(handler: Handler, options: ServeOptions = {}): Promi
       void answerUpgrade(req, socket, head, {
         decide: (request, platform) => decide.call(handler, request, platform),
         secure: options.tls !== undefined,
+        trustProxy,
         draining: () => draining || quiescing,
         report: reportFailure,
         sockets: upgraded,

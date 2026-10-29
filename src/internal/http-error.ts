@@ -92,7 +92,11 @@ export class HttpError extends Error {
    */
   constructor(status: number, message?: string, options: HttpErrorOptions = {}) {
     if (!Number.isInteger(status) || status < 400 || status > 599) {
-      throw new RangeError(`HttpError: status must be an integer from 400 to 599, got ${status}.`);
+      throw new RangeError(
+        __DEV__
+          ? `HttpError: status must be an integer from 400 to 599, got ${status}.`
+          : "DUSK_HTTP",
+      );
     }
     super(message ?? REASONS[status] ?? `HTTP ${status}`, { cause: options.cause });
     this.name = "HttpError";

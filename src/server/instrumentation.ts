@@ -96,13 +96,15 @@ export function resolveInstrumentation(value: unknown): ResolvedInstrumentation 
     };
   if (typeof value !== "object" || value === null)
     throw new TypeError(
-      "instrumentation must export functions (register, onRequest, onRequestError) and an optional tracer.",
+      __DEV__
+        ? "instrumentation must export functions (register, onRequest, onRequestError) and an optional tracer."
+        : "DUSK_INSTR_2",
     );
   const read = (name: string): unknown => Reflect.get(value, name);
   for (const name of ["register", "onRequest", "onRequestError"] as const) {
     const hook = read(name);
     if (hook !== undefined && !isFunction(hook))
-      throw new TypeError(`instrumentation.${name} must be a function.`);
+      throw new TypeError(__DEV__ ? `instrumentation.${name} must be a function.` : "DUSK_INSTR_1");
   }
   const tracer = read("tracer");
   if (tracer !== undefined) {
@@ -112,7 +114,9 @@ export function resolveInstrumentation(value: unknown): ResolvedInstrumentation 
       !isFunction(Reflect.get(tracer, "startActiveSpan"))
     ) {
       throw new TypeError(
-        "instrumentation.tracer must have a startActiveSpan method (the OpenTelemetry tracer shape).",
+        __DEV__
+          ? "instrumentation.tracer must have a startActiveSpan method (the OpenTelemetry tracer shape)."
+          : "DUSK_INSTR_3",
       );
     }
   }

@@ -172,7 +172,7 @@ export function createImageRoute(
   const processor = options?.processor ?? passthroughProcessor;
   const formats: readonly ImageFormat[] = options?.formats ?? FORMATS_LIST;
   const qualities: readonly number[] = options?.qualities ?? [75];
-  const send = options?.fetch ?? defaultImageFetch();
+  const send = options?.fetch ?? defaultImageFetch(report);
   const cacheControl = options?.cacheControl ?? DEFAULT_CACHE;
 
   /** The source of a url: a local file the app allows, or a remote image from an allowed origin. */
@@ -224,8 +224,9 @@ export function createImageRoute(
   };
 
   return async (event: EventState): Promise<Response> => {
-    if (event.method !== "GET")
-      throw new HttpError(405, "Method Not Allowed", { headers: { allow: "GET" } });
+    // HEAD is answered like GET (the handler drops the body): a crawler or CDN probing an image gets its headers.
+    if (event.method !== "GET" && event.method !== "HEAD")
+      throw new HttpError(405, "Method Not Allowed", { headers: { allow: "GET, HEAD" } });
     const query = event.url.searchParams;
     // One spelling per image: `imageProps` writes exactly url, w, q and f. Another key, a repeated key or a number in
     // another form (`6.4e2`, `0640`, `+640`) would be a new cache key for the same bytes, so a client (or a CDN in front
@@ -322,13 +323,13 @@ export function createImageRoute(
  * to a private address at the connect step (DNS rebinding); elsewhere (Bun, Deno, Workers) it is the platform's `fetch`,
  * which the egress rules of that platform must restrict.
  */
-function defaultImageFetch(): typeof fetch {
+function defaultImageFetch(report: (error: unknown) => void): typeof fetch {
   const host: unknown = Reflect.get(globalThis, "process");
   const versions: unknown =
     typeof host === "object" && host !== null ? Reflect.get(host, "versions") : undefined;
   const has = (name: string): boolean =>
     typeof versions === "object" && versions !== null && Reflect.get(versions, name) !== undefined;
-  return has("node") && !has("bun") && !has("deno") ? safeImageFetch() : globalThis.fetch;
+  return has("node") && !has("bun") && !has("deno") ? safeImageFetch({ report }) : globalThis.fetch;
 }
 
 /** The origin of a response URL, or the empty string for text that is not a URL. */

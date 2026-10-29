@@ -30,6 +30,8 @@ export interface RunFlags {
   readonly workers?: number | "auto";
   /** `start --log`: one line per request the app answers. */
   readonly log: boolean;
+  /** `start --dir`: the build folder to serve, relative to the app. Undefined when absent (the folder the build recorded, else `dist`). */
+  readonly dir?: string;
   /** `--json`: the command prints the JSON contract on stdout (a document, or JSON Lines for `dev` and `start`). */
   readonly json: boolean;
 }
@@ -144,6 +146,7 @@ function parseCommand(command: CommandSpec, args: readonly string[]): Parsed {
     return { kind: "usage", message: workers.message, code: "DUSK_INVALID_OPTION", command };
   }
   const host = values["host"];
+  const dir = values["dir"];
   return {
     kind: "run",
     run: command.run,
@@ -152,6 +155,7 @@ function parseCommand(command: CommandSpec, args: readonly string[]): Parsed {
       ...(port === undefined ? {} : { port }),
       ...(typeof host === "string" ? { host } : {}),
       ...(workers === undefined ? {} : { workers }),
+      ...(typeof dir === "string" && dir !== "" ? { dir } : {}),
       strictPort: values["strictPort"] === true,
       open: values["open"] === true,
       verbose: values["verbose"] === true,

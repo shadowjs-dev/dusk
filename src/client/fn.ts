@@ -354,7 +354,26 @@ async function sendBatch(base: string, chunk: readonly Queued[]): Promise<void> 
   const headers = new Headers({ [RPC_HEADER]: "1", "content-type": "application/json" });
   applyDeploymentHeader(headers);
   if (chunk.some((item) => item.meta.singleFlight === true)) setLocation(headers);
-  const body = serialize(chunk.map((item) => ({ id: item.id, input: item.input })));
+  let body: string;
+  try {
+    body = serialize(chunk.map((item) => ({ id: item.id, input: item.input })));
+  } catch (error) {
+    // A call whose input cannot be serialized (a function, a class instance) is that call's own failure, as it is when
+    // the call travels alone; the others still go. Left to throw, this unawaited function would leave every call of the
+    // chunk pending forever.
+    const sound = chunk.filter((item) => {
+      try {
+        serialize([item.input]);
+        return true;
+      } catch (cause) {
+        item.reject(cause);
+        return false;
+      }
+    });
+    if (sound.length === chunk.length) for (const item of chunk) item.reject(error);
+    else if (sound.length > 0) await sendBatch(base, sound);
+    return;
+  }
   let response: Response;
   let text: string;
   try {

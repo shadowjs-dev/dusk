@@ -280,7 +280,9 @@ export async function readText(
 ): Promise<string> {
   // NaN would compare false against every size and let the whole body through: an unusable bound is an error.
   if (Number.isNaN(maxBytes) || maxBytes < 0) {
-    throw new RangeError("readTextLimited: maxBytes must be a number of at least 0.");
+    throw new RangeError(
+      __DEV__ ? "readTextLimited: maxBytes must be a number of at least 0." : "DUSK_MAXBYTES",
+    );
   }
   // The charset is checked before the body is read: an unknown one is refused without touching the stream.
   const decoder = textDecoderFor(request.headers.get("content-type"), utf8Only);
@@ -507,7 +509,9 @@ function charsetOf(contentType: string | null): string | undefined {
 export function bodyAlreadyReadError(): HttpError {
   return new HttpError(
     500,
-    "The request body was already consumed. Read it once, keep its bytes with event.rawBody(), or call request.clone() before the first read.",
+    __DEV__
+      ? "The request body was already consumed. Read it once, keep its bytes with event.rawBody(), or call request.clone() before the first read."
+      : "DUSK_BODY",
   );
 }
 

@@ -15,7 +15,9 @@ export function compileHostRules(patterns: readonly string[]): (host: string) =>
   const rules = patterns.map((pattern) => {
     const lower = pattern.trim().toLowerCase();
     if (lower === "" || lower === "*" || /[\s/@]/.test(lower)) {
-      throw new TypeError(`allowed host ${JSON.stringify(pattern)} is invalid.`);
+      throw new TypeError(
+        __DEV__ ? `allowed host ${JSON.stringify(pattern)} is invalid.` : "DUSK_HOST",
+      );
     }
     const portAt = lower.lastIndexOf(":");
     const hasPort = portAt > lower.lastIndexOf("]") && portAt !== -1;

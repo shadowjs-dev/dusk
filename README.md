@@ -270,6 +270,83 @@ must observe the handler's `event.signal` to finish their own asynchronous clean
 - [`@shadow-js/router`](https://router.shadowjs.net), [`@shadow-js/web`](https://shadowjs.net/reference/web/)
 - [ShadowJS website](https://shadowjs.net)
 
+## Production error codes
+
+A production build keeps a short code instead of the development explanation, so message text never reaches user bundles. Search this table for the code. In the explanation, `…` stands for a value the development message names. A code followed by a word (`DUSK_HEADER_5 security.headers`) names the option, feature or member at fault.
+
+| Code | Development explanation |
+| --- | --- |
+| `DUSK_BASE` | base … must be a path such as "/app". |
+| `DUSK_BODY` | The request body was already consumed. Read it once, keep its bytes with event.rawBody(), or call request.clone() before the first read. |
+| `DUSK_BUN_1` | Bun.serve is missing |
+| `DUSK_BUN_2` | Bun.serve did not return a server / Bun.serve returned an unexpected server |
+| `DUSK_CACHE_1` | ….expire must be at least revalidate (… seconds). |
+| `DUSK_CACHE_2` | cacheLife must be an object of named profiles. |
+| `DUSK_CACHE_3` | cacheLife: the profile name … must be lowercase letters, digits and dashes (name). |
+| `DUSK_CACHE_4` | cacheLife profile "…" is not defined (known: …). |
+| `DUSK_CACHE_5` | … must be an integer number of seconds from … to …. |
+| `DUSK_CC_1` | cacheControl must be "no-store" or an object of visibility, maxAge, staleWhileRevalidate, vary. |
+| `DUSK_CC_2` | cacheControl: a POST function cannot be public (a shared cache would answer a write); use private or no-store. |
+| `DUSK_CC_3` | … must be an integer number of seconds from 0 to …. |
+| `DUSK_CC_4` | cacheControl.vary: … is not a header name. |
+| `DUSK_CC_5` | cacheControl.visibility must be "public" or "private". |
+| `DUSK_COOKIE_1` | cookie domain is not a valid host name. |
+| `DUSK_COOKIE_2` | cookie expires is an invalid date. |
+| `DUSK_COOKIE_3` | a __Host- cookie must be Secure, have Path=/ and no Domain. |
+| `DUSK_COOKIE_4` | cookie maxAge must be an integer. |
+| `DUSK_COOKIE_5` | cookie name … is not a valid token. |
+| `DUSK_COOKIE_6` | cookie path must start with / and contain no ; or controls. |
+| `DUSK_COOKIE_7` | SameSite=None requires Secure. |
+| `DUSK_COOKIE_8` | a __Secure- cookie must be Secure. |
+| `DUSK_CORS_1` | security.cors.headers: … is not a header name. |
+| `DUSK_CORS_2` | security.cors.maxAgeSeconds must be an integer, 0 or more. |
+| `DUSK_CORS_3` | security.cors.methods: … is not a method. |
+| `DUSK_CORS_4` | security.cors.origins: … must be an origin such as https://app.example (no * and no path). |
+| `DUSK_CSP_1` | CSP directive … is invalid. |
+| `DUSK_CSP_2` | CSP header is … characters; the limit is …. |
+| `DUSK_CSP_3` | CSP uses {nonce} but the request has no nonce. |
+| `DUSK_CSP_4` | CSP source … in … is invalid. |
+| `DUSK_DENO` | Deno.serve did not return a server / Deno.serve returned an unexpected server |
+| `DUSK_DEPLOY` | deploymentId must be 1 to 128 letters, digits, dots, dashes or underscores. |
+| `DUSK_DOC_1` | document.lang … is not a language tag. |
+| `DUSK_DOC_2` | document.rootId … is not a valid id. |
+| `DUSK_ETAG` | event.etag(enabled) takes a boolean. |
+| `DUSK_FEATURES` | createHandler: features must be an array. |
+| `DUSK_FEATURE_1` | createHandler: features must hold feature objects from @shadow-js/dusk/features/<name> (for example pages()). |
+| `DUSK_FEATURE_2` | A feature the handler options or the manifest need was not given in `features` (the code is followed by the feature name). |
+| `DUSK_FEATURE_3` | createHandler: … is listed twice in features. |
+| `DUSK_HEADERS` | … must be an object of header names and values. |
+| `DUSK_HEADER_1` | …: the value of "…" must not contain a line break, NUL or other control character. |
+| `DUSK_HEADER_2` | … must be false or a non-empty header value. |
+| `DUSK_HEADER_3` | …: "…" cannot be set here (use the cookies API or the framework). |
+| `DUSK_HEADER_4` | …: the value of "…" is longer than … characters. |
+| `DUSK_HEADER_5` | …: "…" is not a valid header name. |
+| `DUSK_HEADER_6` | …: the value of "…" must be a string. |
+| `DUSK_HOST` | allowed host … is invalid. |
+| `DUSK_HTTP` | HttpError: status must be an integer from 400 to 599, got …. |
+| `DUSK_IMAGE_1` | Image: placeholder="blur" needs blurDataURL, a data:image/*;base64 URL of up to 8 KiB. |
+| `DUSK_IMAGE_2` | Image: placeholder="color" needs placeholderColor, a hex color or a color name. |
+| `DUSK_IMAGE_3` | Image: … must be a finite number greater than 0 (got …). |
+| `DUSK_IMAGE_4` | Image: the src … must be a relative path, an http(s), blob: or data:image/* URL, without control characters. |
+| `DUSK_IMGPROPS_1` | imageProps: alt is required (an empty string for decorative images). |
+| `DUSK_IMGPROPS_2` | imageProps: quality must be an integer from 1 to 100. |
+| `DUSK_IMGPROPS_3` | imageProps: … must be a positive integer. |
+| `DUSK_IMGPROPS_4` | imageProps: the src … must be a path on this origin or an http(s) URL, without control characters. |
+| `DUSK_INSTR_1` | instrumentation.… must be a function. |
+| `DUSK_INSTR_2` | instrumentation must export functions (register, onRequest, onRequestError) and an optional tracer. |
+| `DUSK_INSTR_3` | instrumentation.tracer must have a startActiveSpan method (the OpenTelemetry tracer shape). |
+| `DUSK_ISLAND_1` | island "…" does not export a component |
+| `DUSK_ISLAND_2` | The props of an island are not a JSON object, or are not valid JSON. |
+| `DUSK_ISLAND_3` | island "…" is not in the registry |
+| `DUSK_MAXBYTES` | readTextLimited: maxBytes must be a number of at least 0. |
+| `DUSK_METHOD` | security.methodNotAllowed must be "json" or "empty". |
+| `DUSK_OPTION` | … must be an object. |
+| `DUSK_PORT` | serve: port must be an integer from 0 to 65535 (got …) |
+| `DUSK_POSITIVE` | … must be a positive integer. |
+| `DUSK_RENDER` | dusk config: renderId must be made of letters, digits, _ and -. |
+| `DUSK_REQID` | security.requestId must be true, false, or a function (event) => string. |
+| `DUSK_UNKNOWN` | …: unknown key "…"… |
+
 ## Dependencies
 
 - Runtime `@shadow-js/query` `1.0.0`: hashes data-cache keys (`src/server/data-cache.ts`).

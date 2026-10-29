@@ -97,7 +97,7 @@ const DEPLOYMENT_ID = /^[A-Za-z0-9._-]{1,128}$/;
 function positiveInteger(name: string, value: number | undefined, fallback: number): number {
   const chosen = value ?? fallback;
   if (!Number.isInteger(chosen) || chosen < 1)
-    throw new RangeError(`${name} must be a positive integer.`);
+    throw new RangeError(__DEV__ ? `${name} must be a positive integer.` : `DUSK_POSITIVE ${name}`);
   return chosen;
 }
 
@@ -136,7 +136,9 @@ function formLimitsOf(options: Partial<FormLimits> | undefined): FormLimits {
 function normalizeBase(base: string | undefined): string {
   if (base === undefined || base === "" || base === "/") return "";
   if (!base.startsWith("/") || base.startsWith("//") || /[\\?#]|\.\.|\/\//.test(base)) {
-    throw new TypeError(`base ${JSON.stringify(base)} must be a path such as "/app".`);
+    throw new TypeError(
+      __DEV__ ? `base ${JSON.stringify(base)} must be a path such as "/app".` : "DUSK_BASE",
+    );
   }
   return base.endsWith("/") ? base.slice(0, -1) : base;
 }
@@ -157,14 +159,20 @@ function requestIdOf(
   if (value === undefined || value === true) return (event) => event.id;
   if (value === false) return false;
   if (typeof value === "function") return value;
-  throw new TypeError("security.requestId must be true, false, or a function (event) => string.");
+  throw new TypeError(
+    __DEV__
+      ? "security.requestId must be true, false, or a function (event) => string."
+      : "DUSK_REQID",
+  );
 }
 
 /** `security.methodNotAllowed` after validation. */
 function methodNotAllowedOf(value: "json" | "empty" | undefined): "json" | "empty" {
   if (value === undefined || value === "json") return "json";
   if (value === "empty") return "empty";
-  throw new TypeError('security.methodNotAllowed must be "json" or "empty".');
+  throw new TypeError(
+    __DEV__ ? 'security.methodNotAllowed must be "json" or "empty".' : "DUSK_METHOD",
+  );
 }
 
 /**
@@ -247,12 +255,18 @@ export function resolveConfig(options: HandlerOptions): ResolvedConfig {
   const lang = documentOptions.lang ?? options.i18n?.defaultLocale ?? "en";
   const rootId = documentOptions.rootId ?? "app";
   if (!LANG.test(lang))
-    throw new TypeError(`document.lang ${JSON.stringify(lang)} is not a language tag.`);
+    throw new TypeError(
+      __DEV__ ? `document.lang ${JSON.stringify(lang)} is not a language tag.` : "DUSK_DOC_1",
+    );
   if (!ROOT_ID.test(rootId))
-    throw new TypeError(`document.rootId ${JSON.stringify(rootId)} is not a valid id.`);
+    throw new TypeError(
+      __DEV__ ? `document.rootId ${JSON.stringify(rootId)} is not a valid id.` : "DUSK_DOC_2",
+    );
   const renderId = options.renderId ?? "0";
   if (!RENDER_ID.test(renderId))
-    throw new TypeError("dusk config: renderId must be made of letters, digits, _ and -.");
+    throw new TypeError(
+      __DEV__ ? "dusk config: renderId must be made of letters, digits, _ and -." : "DUSK_RENDER",
+    );
   const healthPath =
     options.healthPath === false ? undefined : (options.healthPath ?? "/_dusk/health");
   const base = normalizeBase(options.base);
@@ -261,7 +275,9 @@ export function resolveConfig(options: HandlerOptions): ResolvedConfig {
   const cors = resolveCors(security.cors);
   if (options.deploymentId !== undefined && !DEPLOYMENT_ID.test(options.deploymentId)) {
     throw new TypeError(
-      "deploymentId must be 1 to 128 letters, digits, dots, dashes or underscores.",
+      __DEV__
+        ? "deploymentId must be 1 to 128 letters, digits, dots, dashes or underscores."
+        : "DUSK_DEPLOY",
     );
   }
   return {

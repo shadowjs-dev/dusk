@@ -62,7 +62,7 @@ import {
   mergeBuildOptions,
   publicEnvOf,
 } from "./config-file";
-import { escapesFolder, isInsideFolder } from "./containment";
+import { adapterOutDirConflict, escapesFolder, isInsideFolder } from "./containment";
 import { CONVENTION_PREFIX, ConventionError, discoverConventions } from "./conventions";
 import { devMiddleware } from "./dev";
 import { readEntryStaticOptions } from "./entry-static-options";
@@ -105,6 +105,7 @@ import {
   analyzeFile,
   checkCollisions,
   discoverProject,
+  isServerFnSource,
   type ProjectLayout,
   type ServerFnCache,
   type ServerFnRecord,
@@ -472,7 +473,9 @@ export function duskCore(
   async function loadServerFns(): Promise<readonly ServerFnRecord[]> {
     const layout = layoutOf();
     if (state.fnByFile === undefined) {
-      const records = await scanServerFns(layout, fnCache);
+      const records = await scanServerFns(layout, fnCache, (message) =>
+        state.config?.logger.warn(`dusk: ${message}`),
+      );
       const byFile = new Map<string, ServerFnRecord[]>();
       for (const record of records) {
         const list = byFile.get(record.file) ?? [];
@@ -720,6 +723,13 @@ export function duskCore(
       throw new Error(`dusk: adapter "${adapter.name}" writes to ${outDir}, outside the project`);
     }
     const outRoot = join(state.root, opts().outDir);
+    // The adapter's folder is emptied below: it may not be the build output, the sources, or inside a bundle.
+    const overlap = adapterOutDirConflict(outDir, outRoot, layoutOf().srcDir);
+    if (overlap !== undefined) {
+      throw new Error(
+        `dusk: adapter "${adapter.name}" writes to ${outDir}, but ${overlap}, and the build empties the adapter's folder; give the adapter another outDir.`,
+      );
+    }
     const serverDir = join(outRoot, "server");
     const serverFiles: BundleFile[] = [];
     for (const file of await listScripts(serverDir)) {
@@ -785,22 +795,23 @@ export function duskCore(
   /** Every `.js` and `.mjs` file below a folder, sorted. A missing folder has none. */
   async function listScripts(dir: string): Promise<string[]> {
     const found: string[] = [];
-    const walk = async (current: string): Promise<void> => {
+    // Iterative: chunk folders can nest as deep as the bundler's file names say.
+    const pending = [dir];
+    for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
       let entries: Dirent[];
       try {
         entries = await readdir(current, { withFileTypes: true });
       } catch (error) {
         // A folder that was never written has no scripts; any other failure is the build's failure.
-        if (isMissing(error)) return;
+        if (isMissing(error)) continue;
         throw error;
       }
       for (const entry of entries) {
         const path = join(current, entry.name);
-        if (entry.isDirectory()) await walk(path);
+        if (entry.isDirectory()) pending.push(path);
         else if (/\.m?js$/.test(entry.name)) found.push(path);
       }
-    };
-    await walk(dir);
+    }
     return found.sort();
   }
 
@@ -1098,14 +1109,11 @@ export function duskCore(
             ? [userConfig.envPrefix]
             : [...userConfig.envPrefix];
       state.prefixes = publicPrefixes([...configuredPrefixes, ...publicEnv.prefixes]);
-      const files =
-        userConfig.envDir === false
-          ? NO_ENV_FILES
-          : readEnvFiles(env.mode, userConfig.envDir ?? state.root);
-      state.envFiles =
-        userConfig.envDir === false
-          ? []
-          : loadedEnvFiles(env.mode, userConfig.envDir ?? state.root);
+      // Vite resolves a relative `envDir` against the root; so does this (the working folder may be another one).
+      const envDir =
+        userConfig.envDir === false ? false : resolve(state.root, userConfig.envDir ?? ".");
+      const files = envDir === false ? NO_ENV_FILES : readEnvFiles(env.mode, envDir);
+      state.envFiles = envDir === false ? [] : loadedEnvFiles(env.mode, envDir);
       // A name declared both in .env.public and in a server file has no single visibility: refused here.
       checkEnvFiles(files, state.prefixes);
       state.envValues = resolvedValues(files);
@@ -1410,13 +1418,16 @@ export function duskCore(
       const onFile = (file: string): void => {
         const path = file.split("\\").join("/");
         if (!path.startsWith(`${layout.srcDir.split("\\").join("/")}/`)) return;
+        if (!isServerFnSource(layout.srcDir, file)) return;
         void (async () => {
           const byFile = state.fnByFile;
           if (byFile === undefined) return;
           const previous = JSON.stringify(byFile.get(file)?.map((record) => record.fn));
           let fns: readonly ServerFnRecord["fn"][] = [];
           try {
-            fns = await analyzeFile(file, state.root, fnCache);
+            fns = await analyzeFile(file, state.root, fnCache, (message) =>
+              server.config.logger.warn(`dusk: ${message}`),
+            );
           } catch (error) {
             // A file that cannot be read or compiled right now (deleted, half-written, with a
             // problem the transform reports when it is requested): no functions until it is fixed.

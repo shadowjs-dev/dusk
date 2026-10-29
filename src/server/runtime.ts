@@ -34,6 +34,11 @@ export interface RpcRuntime extends Runtime {
   readonly pageRoutes?: PageRuntime["pageRoutes"];
   /** The router features of the page routes, with `pageRoutes` (see `PageRuntime.routerFeatures`). */
   readonly routerFeatures?: PageRuntime["routerFeatures"];
+  /**
+   * The matcher of the page routes, with `pageRoutes`: a single-flight answer finds the page chain with it, to run the
+   * middleware of the page before its loaders.
+   */
+  readonly pageMatcher?: PageRuntime["pageMatcher"];
 }
 
 /**

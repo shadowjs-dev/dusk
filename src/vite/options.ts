@@ -153,11 +153,41 @@ function suggest(name: string): string | undefined {
   return undefined;
 }
 
+/** The segments of a folder setting without empty and `.` parts: `./dist/` and `dist` are the same folder. */
+function folderSegments(value: string): string[] {
+  return value.split(/[\\/]/).filter((part) => part !== "" && part !== ".");
+}
+
 function relativeFolder(name: string, value: string): string {
-  if (value === "" || value.startsWith("/") || value.split(/[\\/]/).includes("..")) {
+  if (
+    value === "" ||
+    value.startsWith("/") ||
+    // A drive path is absolute on Windows only, and the rule holds on every OS.
+    /^[A-Za-z]:/.test(value) ||
+    value.split(/[\\/]/).includes("..")
+  ) {
     throw new TypeError(`dusk: ${name} must be a folder inside the project (got "${value}")`);
   }
   return value.replace(/[\\/]+$/, "");
+}
+
+/**
+ * The build empties `outDir` before it writes, so a folder that is the project itself, or holds the source folder, would
+ * delete the app's own files.
+ */
+function checkOutDir(outDir: string, srcDir: string): void {
+  const out = folderSegments(outDir);
+  const src = folderSegments(srcDir);
+  if (out.length === 0) {
+    throw new TypeError(
+      `dusk: outDir must be a folder of its own, not the project root (got "${outDir}"); the build empties it.`,
+    );
+  }
+  if (out.length <= src.length && out.every((part, index) => part === src[index])) {
+    throw new TypeError(
+      `dusk: outDir "${outDir}" holds the source folder "${srcDir}", and the build empties outDir; choose another folder such as "dist".`,
+    );
+  }
 }
 
 /**
@@ -182,6 +212,7 @@ export function resolveOptions(options: DuskOptions = {}): ResolvedDuskOptions {
   }
   const srcDir = relativeFolder("srcDir", options.srcDir ?? "src");
   const outDir = relativeFolder("outDir", options.outDir ?? "dist");
+  checkOutDir(outDir, srcDir);
   const max = options.maxPreloadsPerRoute ?? 24;
   if (!Number.isInteger(max) || max < 1 || max > 1024) {
     throw new TypeError("dusk: maxPreloadsPerRoute must be an integer from 1 to 1024");

@@ -291,6 +291,23 @@ describe("dusk output: build summary", () => {
     expect(lines.join("\n")).not.toContain("Route");
   });
 
+  it("[DUSK-R5-3] a custom dusk({ outDir }) is the folder the summary and the serve hint print, not dist", () => {
+    const text = buildLines(
+      {
+        ...summary,
+        outDir: "build/out",
+        adapter: { name: "node", outDir: "build/out/node" },
+        adapterLog: ["wrote build/out/node/server.mjs"],
+      },
+      PLAIN,
+    ).join("\n");
+    expect(text).toContain("✓ Built in 2.5s, output in build/out/");
+    expect(text).toContain("Compiled client      build/out/client");
+    expect(text).toContain("Compiled server      build/out/server");
+    expect(text).toContain("run `node build/out/node/server.mjs`.");
+    expect(text).not.toContain("dist/");
+  });
+
   it("[CLI-22] kilobytes are decimal (1000 bytes) with one decimal place", () => {
     expect(kilobytes(72_400)).toBe("72.4 kB");
     expect(kilobytes(999)).toBe("1.0 kB");

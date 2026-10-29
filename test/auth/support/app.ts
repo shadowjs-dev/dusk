@@ -195,6 +195,22 @@ export async function startApp(options: AppOptions = {}): Promise<App> {
         ),
         route(
           {
+            // Test only: forgets the signed-in user (and optionally the stored ID token) but keeps the tokens.
+            POST: async (event: RequestEvent) => {
+              const session = await sessions.get(event);
+              session.delete("user");
+              if (event.url.searchParams.has("noIdToken")) {
+                const tokens = session.get<Record<string, unknown>>("user:tokens") ?? {};
+                const { idToken: _dropped, ...rest } = tokens;
+                session.set("user:tokens", rest);
+              }
+              return json({ ok: true });
+            },
+          },
+          "/test/forget-user",
+        ),
+        route(
+          {
             GET: async (event: RequestEvent) => {
               try {
                 return json(await oidc.userinfo(event));

@@ -10,6 +10,7 @@ import {
   createComponent,
   createServerHead,
   createServerPortals,
+  escape as escapeHtml,
   renderToStream,
   renderToString,
   renderToStringAsync,
@@ -176,7 +177,8 @@ function globalDocument(rendered: string, headHtml: string, lang: string): strin
   if (htmlAt !== -1) {
     return `<!doctype html>${rendered.slice(0, htmlAt)}<head>${headHtml}</head>${rendered.slice(htmlAt)}`;
   }
-  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">${headHtml}</head><body>${rendered}</body></html>`;
+  // `lang` is `event.document.lang`, which a locale middleware may have taken from the request: escaped as `buildShell` does.
+  return `<!doctype html><html lang="${escapeHtml(lang)}"><head><meta charset="utf-8">${headHtml}</head><body>${rendered}</body></html>`;
 }
 
 /** `data-sh` block with the resource values a streamed render would have sent. */
@@ -408,7 +410,7 @@ export async function renderPage(rt: PageRuntime, event: EventState): Promise<Re
     }
 
     // The flash is read only for a page that renders: a redirect or an error keeps it for the next page.
-    const flash = await takeFlash(event);
+    const flash = await takeFlash(event, (error) => rt.report(error, "render", event));
     const submissions = createSubmissionStore();
     bindSubmissions(router, submissions);
     if (flash !== undefined) submissions.seed(flash);

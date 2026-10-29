@@ -66,6 +66,21 @@ export interface SseClient {
 
 const DEFAULT_MIN_DELAY = 500;
 const DEFAULT_MAX_DELAY = 30_000;
+/** The longest wait a server's `Retry-After` can impose: a day-long value must not park the client for a day. */
+const MAX_RETRY_AFTER = 300_000;
+
+/** Answers that are retried even though they are 4xx: the request itself was fine (RFC 9110 15.5.9, RFC 6585 4). */
+const RETRYABLE_REFUSALS: ReadonlySet<number> = new Set([408, 429]);
+
+/** The wait a `Retry-After` header asks for, in milliseconds (delta-seconds or an HTTP date), or `undefined`. */
+function retryAfterOf(response: Response): number | undefined {
+  const raw = response.headers.get("retry-after")?.trim();
+  if (raw === undefined || raw === "") return undefined;
+  if (/^\d+$/.test(raw)) return Math.min(Number(raw) * 1000, MAX_RETRY_AFTER);
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return undefined;
+  return Math.min(Math.max(0, at - Date.now()), MAX_RETRY_AFTER);
+}
 
 /** The delay before attempt `attempt` (0-based) of a reconnection. */
 function delayFor(
@@ -149,8 +164,10 @@ export function createSseParser(
 
 /**
  * Opens an SSE stream and keeps it open: on a drop it waits (backoff, or the server's `retry`) and
- * reconnects with the last event id. Events arrive in order. A 4xx answer stops it (the server refused
- * the stream, retrying would not help); a 5xx or a network error is retried.
+ * reconnects with the last event id. Events arrive in order. A 204 answer stops it (the server's way of
+ * saying "do not reconnect"), and so does a 4xx answer (the server refused the stream, retrying would not
+ * help) except 408 and 429; those, a 5xx and a network error are retried with backoff. A `Retry-After`
+ * header on a retried answer sets a minimum wait (at most five minutes).
  *
  * @param options The URL, the handler and the policy.
  * @returns The client.
@@ -180,6 +197,7 @@ export function createSseClient<T = unknown>(options: SseClientOptions<T>): SseC
     let attempt = 0;
     let serverRetry: number | undefined;
     while (!closed) {
+      let retryAfter: number | undefined;
       controller = new AbortController();
       const headers = new Headers(options.headers);
       headers.set("accept", "text/event-stream");
@@ -192,8 +210,16 @@ export function createSseClient<T = unknown>(options: SseClientOptions<T>): SseC
           signal: controller.signal,
           credentials: "same-origin",
         });
-        if (response.status >= 400 && response.status < 500) refused = true;
-        if (response.ok && response.body !== null) {
+        // 204: the server tells the client to stop reconnecting (HTML Living Standard, server-sent events).
+        if (response.status === 204) refused = true;
+        else if (
+          response.status >= 400 &&
+          response.status < 500 &&
+          !RETRYABLE_REFUSALS.has(response.status)
+        ) {
+          refused = true;
+        }
+        if (response.ok && response.status !== 204 && response.body !== null) {
           setStatus("open");
           attempt = 0;
           const feed = createSseParser(
@@ -217,7 +243,9 @@ export function createSseClient<T = unknown>(options: SseClientOptions<T>): SseC
             feed(decoder.decode(value, { stream: true }));
           }
         } else {
-          refused = refused || !response.ok;
+          // 408, 429, 5xx and a 2xx without a body are retried: the server may say when to come back.
+          if (!refused) retryAfter = retryAfterOf(response);
+          await response.body?.cancel();
         }
       } catch (error) {
         // close() aborts the request: that is the end, not a failure.
@@ -231,7 +259,11 @@ export function createSseClient<T = unknown>(options: SseClientOptions<T>): SseC
       setStatus("reconnecting");
       await new Promise<void>((resolve) => {
         wake = resolve;
-        timer = setTimeout(resolve, delayFor(attempt - 1, reconnect, serverRetry));
+        const backoff = delayFor(attempt - 1, reconnect, serverRetry);
+        timer = setTimeout(
+          resolve,
+          retryAfter === undefined ? backoff : Math.max(backoff, retryAfter),
+        );
       });
       wake = undefined;
     }

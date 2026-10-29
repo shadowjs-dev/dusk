@@ -2,13 +2,13 @@ import { createMemoryHistory, createRouter, type RouterFeature } from "@shadow-j
 import { createMatcher, type RouteVisibility } from "@shadow-js/router/core";
 import { HttpError } from "../internal/http-error";
 import type * as MetadataServer from "../metadata/server";
-import { runMiddleware } from "../server/api";
 import type * as ParamsModule from "../server/dynamic-params";
 import type { ParamsGate } from "../server/dynamic-params";
 import { type EventState, visibilityOf } from "../server/event";
 import { failureResponseFor } from "../server/failure";
 import type { DuskFeature, PagesCapability } from "../server/features";
 import { json, readJson } from "../server/json";
+import { runMiddleware } from "../server/middleware-chain";
 import { renderPage, renderShellPage } from "../server/page";
 import { gateTargetOf, pageMiddlewareFor } from "../server/route-middleware";
 import { wrapRoutes } from "../server/route-wrap";

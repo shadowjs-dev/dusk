@@ -37,25 +37,31 @@ export interface IslandsHandle {
   dispose(): void;
 }
 
-/** The props attribute, read back: plain data written by `islandAttributes`. */
-function readProps(text: string | null): Readonly<Record<string, unknown>> {
-  if (text === null) return {};
-  let value: unknown;
+/** The props attribute, read back: plain data written by `islandAttributes`. A bad value goes to `report`. */
+function readProps(
+  text: string | null,
+  report: (error: unknown) => void,
+): Readonly<Record<string, unknown>> | undefined {
+  let cause: unknown;
   try {
-    value = JSON.parse(text);
-  } catch (cause) {
-    throw new IslandPropsError("the props of an island are not valid JSON", cause);
+    const value: unknown = text === null ? {} : JSON.parse(text);
+    if (typeof value === "object" && value !== null && !Array.isArray(value))
+      return value as Readonly<Record<string, unknown>>;
+  } catch (error) {
+    cause = error;
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new IslandPropsError("the props of an island must be a JSON object", undefined);
-  }
-  return value as Readonly<Record<string, unknown>>;
-}
-
-/** The first top-level island under `root` (an island inside another island is left to its outer one). */
-function isTopLevel(element: Element): boolean {
-  const parent = element.parentElement?.closest("[data-island]");
-  return parent === null || parent === undefined;
+  // Only a parse failure has a cause: a value that parsed but is not an object has none.
+  report(
+    new IslandPropsError(
+      __DEV__
+        ? cause === undefined
+          ? "the props of an island must be a JSON object"
+          : "the props of an island are not valid JSON"
+        : "DUSK_ISLAND_2",
+      cause,
+    ),
+  );
+  return undefined;
 }
 
 /**
@@ -76,108 +82,89 @@ export function hydrateIslands(options: HydrateIslandsOptions): IslandsHandle {
   let hydrated = 0;
   let disposed = false;
 
-  const mount = async (
-    element: Element,
-    id: string,
-    props: Readonly<Record<string, unknown>>,
-  ): Promise<void> => {
-    // `only` islands have no server markup: they are rendered, not hydrated.
-    const serverRendered = element.getAttribute("data-client") !== "only";
-    const load = Object.hasOwn(options.registry, id) ? options.registry[id] : undefined;
-    if (load === undefined) {
-      report(new Error(`island "${id}" is not in the registry`));
-      return;
-    }
-    try {
-      const loaded = await load();
-      const component = typeof loaded === "function" ? loaded : loaded.default;
-      if (typeof component !== "function")
-        throw new TypeError(`island "${id}" does not export a component`);
-      if (disposed) return;
-      if (serverRendered) {
-        // The server's markup is the island's first render: the component claims it (no second copy of the page).
-        disposers.push(hydrate(() => component(props), element));
-      } else {
-        element.replaceChildren();
-        disposers.push(render(() => component(props), element));
-      }
-      hydrated += 1;
-    } catch (error) {
-      report(error);
-    }
-  };
-
-  /** Runs `start` once, when the strategy of the element fires. */
-  const schedule = (
-    element: Element,
-    strategy: string,
-    media: string | undefined,
-    start: () => void,
-  ): void => {
+  /** Mounts the island of `element` once, when its strategy fires. */
+  const schedule = (element: Element, props: Readonly<Record<string, unknown>>): void => {
+    // The selector of the loop below guarantees `data-island`.
+    const id = element.getAttribute("data-island") as string;
+    const strategy = element.getAttribute("data-client") ?? "visible";
     let started = false;
+    // What waits for the strategy to fire (an observer, a listener, a timer). Every wait is released when the island
+    // starts or the handle is disposed; releasing twice is harmless.
+    let stop: (() => void) | undefined;
     const once = (): void => {
       if (started || disposed) return;
       started = true;
-      start();
+      stop?.();
+      void mount();
     };
-    if (strategy === "load" || strategy === "only") {
-      once();
-    } else if (strategy === "visible" && typeof IntersectionObserver !== "undefined") {
-      const observer = new IntersectionObserver((entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          observer.disconnect();
-          once();
+    const mount = async (): Promise<void> => {
+      try {
+        const load = Object.hasOwn(options.registry, id) ? options.registry[id] : undefined;
+        if (load === undefined)
+          throw new Error(
+            __DEV__ ? `island "${id}" is not in the registry` : `DUSK_ISLAND_3 ${id}`,
+          );
+        const loaded = await load();
+        const component = typeof loaded === "function" ? loaded : loaded.default;
+        if (typeof component !== "function")
+          throw new TypeError(
+            __DEV__ ? `island "${id}" does not export a component` : `DUSK_ISLAND_1 ${id}`,
+          );
+        if (disposed) return;
+        // `only` islands have no server markup: they are rendered, not hydrated.
+        if (strategy !== "only") {
+          // The server's markup is the island's first render: the component claims it (no second copy of the page).
+          disposers.push(hydrate(() => component(props), element));
+        } else {
+          element.replaceChildren();
+          disposers.push(render(() => component(props), element));
         }
+        hydrated += 1;
+      } catch (error) {
+        report(error);
+      }
+    };
+    const media = element.getAttribute("data-media");
+    if (strategy === "visible" && typeof IntersectionObserver !== "undefined") {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) once();
       });
       observer.observe(element);
-      disposers.push(() => observer.disconnect());
+      stop = () => observer.disconnect();
     } else if (strategy === "idle") {
-      const handle =
-        typeof requestIdleCallback === "function" ? requestIdleCallback(once) : setTimeout(once, 1);
-      disposers.push(() => {
-        if (typeof handle === "number") clearTimeout(handle);
-      });
+      // An idle handle and a timer handle live in different id spaces: each is canceled by its own function, or
+      // `clearTimeout` could cancel an unrelated timer of the page that happens to hold the same number.
+      const idle = typeof requestIdleCallback === "function";
+      const handle = idle ? requestIdleCallback(once) : setTimeout(once, 1);
+      stop = () => (idle ? cancelIdleCallback(handle as number) : clearTimeout(handle));
     } else if (strategy === "interaction") {
       const events = ["pointerdown", "focusin", "keydown"] as const;
-      const fire = (): void => {
-        for (const type of events) element.removeEventListener(type, fire);
-        once();
+      for (const type of events) element.addEventListener(type, once, { passive: true });
+      stop = () => {
+        for (const type of events) element.removeEventListener(type, once);
       };
-      for (const type of events) element.addEventListener(type, fire, { passive: true });
-      disposers.push(() => {
-        for (const type of events) element.removeEventListener(type, fire);
-      });
-    } else if (strategy === "media" && media !== undefined && typeof matchMedia === "function") {
+    } else if (strategy === "media" && media !== null && typeof matchMedia === "function") {
       const query = matchMedia(media);
       const check = (): void => {
-        if (query.matches) {
-          query.removeEventListener("change", check);
-          once();
-        }
+        if (query.matches) once();
       };
+      query.addEventListener("change", check);
+      stop = () => query.removeEventListener("change", check);
       check();
-      if (!started) query.addEventListener("change", check);
-      disposers.push(() => query.removeEventListener("change", check));
     } else {
-      // visible without an IntersectionObserver, or an unknown media query: mount now rather than never.
+      // `load`, `only`, visible without an IntersectionObserver, or a media strategy without a usable query: mount now
+      // rather than never.
       once();
+      return;
     }
+    disposers.push(stop);
   };
 
   for (const element of root.querySelectorAll("[data-island]")) {
-    if (!isTopLevel(element)) continue;
-    const id = element.getAttribute("data-island") ?? "";
-    const strategy = element.getAttribute("data-client") ?? "visible";
-    let props: Readonly<Record<string, unknown>>;
-    try {
-      props = readProps(element.getAttribute("data-props"));
-    } catch (error) {
-      report(error);
-      continue;
-    }
-    schedule(element, strategy, element.getAttribute("data-media") ?? undefined, () => {
-      void mount(element, id, props);
-    });
+    // An island inside another island is left to its outer one.
+    if (element.parentElement?.closest("[data-island]")) continue;
+    const props = readProps(element.getAttribute("data-props"), report);
+    if (props !== undefined) schedule(element, props);
   }
 
   return {

@@ -16,6 +16,8 @@
  * - a background refresh that fails keeps the stale value, goes to `report`, and backs off (1 s, doubling to 60 s);
  *   it is handed to the platform's `waitUntil` when the request has one;
  * - a run that began before a purge of one of its tags does not store its value after it;
+ * - a store that fails (read or write) is reported to `report` and the function's value is returned: an outage costs the
+ *   cache, never the request;
  * - an error is never cached; a value that is not JSON is a TypeError; a value over `maxValueBytes` is
  *   returned and not stored;
  * - tags index the entries, so `revalidateTag(tag)` (and `purgeTag`) removes them;
@@ -92,6 +94,8 @@ export interface CachedFetchOptions {
   readonly tags?: readonly string[];
   readonly revalidate?: number | false;
   readonly cacheLife?: string;
+  /** Fetches and stores nothing, with the same checks and parsing as a cached call (draft mode sets this for every call). */
+  readonly bypass?: boolean;
 }
 
 /** The data cache of one handler. @since 1.0.0 */
@@ -285,8 +289,18 @@ export function createDataCache(options: DataCacheOptions): DataCache {
     if (guard.touched(mark, tags)) return value;
     const ttl =
       staleUntil === null ? undefined : Math.max(1, Math.ceil((staleUntil - now()) / 1000));
-    await kv.set(storeKey, data, ttl === undefined ? undefined : { ttlSeconds: ttl });
-    for (const tag of tags) await index(tag, storeKey, true);
+    // The value is computed and good: a store that fails now (an outage) must not fail the loader that asked for it. The
+    // failure is reported, as the page cache does, and the next call computes again.
+    let stored = false;
+    try {
+      await kv.set(storeKey, data, ttl === undefined ? undefined : { ttlSeconds: ttl });
+      stored = true;
+      for (const tag of tags) await index(tag, storeKey, true);
+    } catch (error) {
+      report(error);
+      // An entry no tag lists could never be purged by `revalidateTag`: drop it rather than keep it unreachable.
+      if (stored) await kv.delete(storeKey).catch(report);
+    }
     return value;
   };
 
@@ -329,7 +343,12 @@ export function createDataCache(options: DataCacheOptions): DataCache {
       const tags = tagsOf(call.tags);
       const storeKey = storeKeyOf(call.key);
       if (call.bypass === true) return fn(call.signal ?? new AbortController().signal);
-      const found = await kv.get(storeKey);
+      // A store that cannot be read is a cache miss, not a failed request: the error is reported (as the page cache does)
+      // and the function computes fresh data.
+      const found = await kv.get(storeKey).catch((error: unknown) => {
+        report(error);
+        return undefined;
+      });
       const at = now();
       if (isStored(found)) {
         if (found.freshUntil === null || at < found.freshUntil) return found.value as T;
@@ -396,6 +415,7 @@ export function createDataCache(options: DataCacheOptions): DataCache {
           ...(call.tags === undefined ? {} : { tags: call.tags }),
           ...(call.revalidate === undefined ? {} : { revalidate: call.revalidate }),
           ...(call.cacheLife === undefined ? {} : { cacheLife: call.cacheLife }),
+          ...(call.bypass === true ? { bypass: true } : {}),
         },
       );
       return (stored.type.includes("json") ? JSON.parse(stored.body) : stored.body) as T;
@@ -495,11 +515,7 @@ export async function cachedFetch<T = unknown>(
   options: CachedFetchOptions,
 ): Promise<T> {
   const { event, cache } = ownerOf();
-  if (event.draft) {
-    const response = await fetch(new URL(String(input)).href, {
-      ...(init === undefined ? {} : init),
-    } as RequestInit);
-    return (await response.json()) as T;
-  }
-  return cache.cachedFetch<T>(input, init, options);
+  // Draft mode takes the same path with the cache bypassed: the checks (GET only, no credential headers, no credentials in
+  // the URL), the error on a non-OK answer and the parsing (JSON by content type, else text) are not a cache feature.
+  return cache.cachedFetch<T>(input, init, event.draft ? { ...options, bypass: true } : options);
 }

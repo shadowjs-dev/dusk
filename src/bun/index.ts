@@ -33,14 +33,15 @@ function bunGlobal(): BunRuntime {
   return {
     serve(options) {
       const serve: unknown = Reflect.get(bun, "serve");
-      if (typeof serve !== "function") throw new Error("Bun.serve is missing");
+      if (typeof serve !== "function")
+        throw new Error(__DEV__ ? "Bun.serve is missing" : "DUSK_BUN_1");
       const server: unknown = Reflect.apply(serve, bun, [options]);
       if (typeof server !== "object" || server === null)
-        throw new Error("Bun.serve did not return a server");
+        throw new Error(__DEV__ ? "Bun.serve did not return a server" : "DUSK_BUN_2");
       const port: unknown = Reflect.get(server, "port");
       const stop: unknown = Reflect.get(server, "stop");
       if (typeof port !== "number" || typeof stop !== "function")
-        throw new Error("Bun.serve returned an unexpected server");
+        throw new Error(__DEV__ ? "Bun.serve returned an unexpected server" : "DUSK_BUN_2");
       return {
         port,
         stop: (closeActive: boolean) =>

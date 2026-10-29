@@ -337,9 +337,10 @@ function expandReferences(value: string, known: Readonly<Record<string, string>>
  * @example readEnvFiles("development", "/app").publicNames; // ["SITE_URL"]
  */
 export function readEnvFiles(mode: string, envDir: string): EnvFiles {
-  const values: Record<string, string> = {};
-  const sources: Record<string, string> = {};
-  const declaredIn: Record<string, string[]> = {};
+  // No prototype: a variable may be named `constructor` or `toString`, and a lookup must not find Object's member.
+  const values: Record<string, string> = Object.create(null);
+  const sources: Record<string, string> = Object.create(null);
+  const declaredIn: Record<string, string[]> = Object.create(null);
   const publicNames = new Set<string>();
   const serverNames = new Set<string>();
   for (const layer of layersOf(mode)) {

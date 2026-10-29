@@ -159,7 +159,8 @@ export class EventState implements RequestEvent {
   }
 
   etag(enabled: boolean): void {
-    if (typeof enabled !== "boolean") throw new TypeError("event.etag(enabled) takes a boolean.");
+    if (typeof enabled !== "boolean")
+      throw new TypeError(__DEV__ ? "event.etag(enabled) takes a boolean." : "DUSK_ETAG");
     this.etagPolicy = enabled;
   }
 
@@ -177,13 +178,30 @@ export class EventState implements RequestEvent {
     return readBodyBytes(this.request);
   }
 
+  /**
+   * Takes over what the middleware that already ran for `source` stored on it: the `locals` and the values set with
+   * `set`. A single-flight answer runs the loaders of a page under an event of its own; this gives that event the
+   * identity the app-wide middleware worked out for the mutation (the page's own middleware then runs on top of it, as it
+   * does for a page request).
+   *
+   * @param source The event of the request the middleware ran for.
+   * @internal
+   */
+  inheritFrom(source: EventState): void {
+    Object.assign(this.locals, source.locals);
+    for (const [key, value] of source.#values) this.#values.set(key, value);
+  }
+
   set<T>(key: ContextKey<T>, value: T): void {
     this.#values.set(key, value);
   }
 
   get<T>(key: ContextKey<T>): T {
     if (!this.#values.has(key)) {
-      throw new DuskError("CONTEXT_KEY_UNSET", `the context key "${key.name}" was never set.`);
+      throw new DuskError(
+        "CONTEXT_KEY_UNSET",
+        __DEV__ ? `the context key "${key.name}" was never set.` : key.name,
+      );
     }
     return this.#values.get(key) as T;
   }

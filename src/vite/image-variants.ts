@@ -68,6 +68,7 @@ const RASTER = /\.(?:jpe?g|png|webp)$/i;
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|mdx?|html|css|json|svelte|vue|astro)$/i;
 const MAX_SOURCE_BYTES = 1024 * 1024;
 const MAX_SOURCE_FILES = 20_000;
+const MAX_PUBLIC_IMAGES = 100_000;
 /** Most pixels sharp decodes for one source (the same bound as the runtime optimizer). */
 const MAX_INPUT_PIXELS = 100_000_000;
 
@@ -481,30 +482,46 @@ export async function prepareImages(input: PrepareInput): Promise<PreparedImages
   return { map, files: [...files.values()], oversize, prepared };
 }
 
-/** The files under a folder, as `/`-separated paths relative to it. */
+/** True for the error of a path that is not there (or whose parent is a file): the only read failure that means "none". */
+function isAbsent(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : undefined;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * The files under a folder, as `/`-separated paths relative to it; `truncated` when the limit stopped the walk with entries
+ * left unread (a file past the limit, or folders not opened, which may or may not hold more).
+ */
 async function walk(
   dir: string,
   accept: (path: string) => boolean,
   limit: number,
-): Promise<string[]> {
+): Promise<{ readonly files: string[]; readonly truncated: boolean }> {
   const out: string[] = [];
+  let truncated = false;
   const pending = [""];
   while (pending.length > 0 && out.length < limit) {
     const folder = pending.pop() ?? "";
     let entries: import("node:fs").Dirent[];
     try {
       entries = await readdir(join(dir, folder), { withFileTypes: true });
-    } catch {
-      continue;
+    } catch (error) {
+      // A folder that is not there (no `public/`, no `src/`, or one removed while walking) has no images. Anything else
+      // (permissions, I/O) would turn into "this app has no images" and ship a build without its variants.
+      if (isAbsent(error)) continue;
+      throw error;
     }
     for (const entry of entries) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       const path = folder === "" ? entry.name : `${folder}/${entry.name}`;
       if (entry.isDirectory()) pending.push(path);
-      else if (entry.isFile() && accept(path)) out.push(path);
+      else if (entry.isFile() && accept(path)) {
+        if (out.length < limit) out.push(path);
+        else truncated = true;
+      }
     }
   }
-  return out.sort();
+  return { files: out.sort(), truncated: truncated || pending.length > 0 };
 }
 
 /**
@@ -514,6 +531,8 @@ async function walk(
  * @param root The project root.
  * @param publicDir The `public/` folder.
  * @param include The extra globs.
+ * @param warn Told when a limit left part of the project unread: more than 20000 source files, a source file over
+ *   1 MiB, or more than 100000 images (Vite's logger in the plugin).
  * @returns Paths relative to `public/`, with `/` separators.
  * @since 1.0.0
  * @example
@@ -528,29 +547,51 @@ export async function referencedImages(
   root: string,
   publicDir: string,
   include: readonly string[],
+  warn?: (message: string) => void,
 ): Promise<readonly string[]> {
-  const available = new Set(await walk(publicDir, (path) => RASTER.test(path), 100_000));
+  const images = await walk(publicDir, (path) => RASTER.test(path), MAX_PUBLIC_IMAGES);
+  if (images.truncated) {
+    warn?.(
+      `imageVariants: stopped reading ${publicDir} at ${MAX_PUBLIC_IMAGES} images; any image past those is served as it is.`,
+    );
+  }
+  const available = new Set(images.files);
   const wanted = new Set<string>();
   const globs = include.map((pattern) => compileGlob(pattern));
   for (const path of available) if (matchesAny(globs, path)) wanted.add(path);
+  const sources = await walk(join(root, "src"), (path) => SOURCE_FILE.test(path), MAX_SOURCE_FILES);
+  if (sources.truncated) {
+    warn?.(
+      `imageVariants: stopped reading src/ at ${MAX_SOURCE_FILES} source files; files past those were not read for image references, so some images may be served as they are.`,
+    );
+  }
   const texts = [
-    ...(await walk(join(root, "src"), (path) => SOURCE_FILE.test(path), MAX_SOURCE_FILES)).map(
-      (path) => join(root, "src", ...path.split("/")),
-    ),
+    ...sources.files.map((path) => join(root, "src", ...path.split("/"))),
     join(root, "index.html"),
   ];
+  const tooBig: string[] = [];
   for (const file of texts) {
     let text: string;
     try {
-      if ((await stat(file)).size > MAX_SOURCE_BYTES) continue;
+      if ((await stat(file)).size > MAX_SOURCE_BYTES) {
+        tooBig.push(file);
+        continue;
+      }
       text = await readFile(file, "utf8");
-    } catch {
-      continue;
+    } catch (error) {
+      if (isAbsent(error)) continue;
+      throw error;
     }
     for (const reference of imageReferences(text)) {
       const path = reference.slice(1);
       if (available.has(path)) wanted.add(path);
     }
+  }
+  if (tooBig.length > 0) {
+    const shown = tooBig.slice(0, 5).map((file) => relative(root, file).split(sep).join("/"));
+    warn?.(
+      `imageVariants: ${tooBig.length} source file${tooBig.length === 1 ? " is" : "s are"} over ${sizeText(MAX_SOURCE_BYTES)} and not read for image references (${shown.join(", ")}${tooBig.length > shown.length ? ", …" : ""}); name the images they use in the include option.`,
+    );
   }
   return [...wanted].sort();
 }
@@ -638,7 +679,12 @@ export function imageVariants(options: ImageVariantsOptions = {}): Plugin {
   const prepare = (): Promise<PreparedImages | undefined> => {
     result ??= (async (): Promise<PreparedImages | undefined> => {
       if (config === undefined || config.publicDir === "") return undefined;
-      const sources = await referencedImages(config.root, config.publicDir, resolved.include);
+      const sources = await referencedImages(
+        config.root,
+        config.publicDir,
+        resolved.include,
+        (message) => config?.logger.warn(message),
+      );
       if (sources.length === 0) return undefined;
       const sharp = await library(sources.length);
       if (sharp === undefined) return undefined;

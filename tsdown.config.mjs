@@ -82,8 +82,9 @@ const builds = createConfig({
   },
 });
 
-// `./vite` is build-time code that runs in Node. It has its own output folder (no dev/prod split,
-// nothing in it depends on `__DEV__`), so cleaning it can never race with the browser builds.
+// `./vite` is build-time code that runs in Node. It has its own output folder (no dev/prod split), so cleaning it can
+// never race with the browser builds. It shares modules with the runtime (`shared/check`, `shared/image`, ...), whose
+// error messages are written for `__DEV__`: a build tool is always a developer's tool, so it is built with `__DEV__` on.
 const vite = defineConfig({
   format: "esm",
   platform: "node",
@@ -94,6 +95,7 @@ const vite = defineConfig({
   // `pwa-worker` is bundled into the app's service worker by the `pwa()` build step, so it is its own entry.
   entry: { index: "src/vite/index.ts", "pwa-worker": "src/vite/pwa-worker.ts" },
   outDir: "dist/vite",
+  define: { __DEV__: "true" },
   outExtensions: () => ({ js: ".js", dts: ".d.ts" }),
   // Per-module output: see tools/build/tsdown-preset.mjs (unbundle).
   unbundle: true,
@@ -137,6 +139,8 @@ const cli = defineConfig({
   clean: false,
   dts: false,
   outDir: "dist/cli",
+  // The same modules as `./vite`, with the same full messages.
+  define: { __DEV__: "true" },
   // The package bin is dist/cli/index.js (tsdown would write .mjs for a module package). tsdown makes a file with a
   // shebang executable itself.
   outExtensions: () => ({ js: ".js" }),

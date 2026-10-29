@@ -564,17 +564,21 @@ export function isWindowsReservedName(segment: string): boolean {
 
 /**
  * The file a path is written to, inside `clientDir`: `/` is `index.html`, `/about` is
- * `about/index.html`. Percent escapes are decoded once; a segment that could leave the folder or
- * is too long is refused.
+ * `about/index.html`. A page whose last segment is a file name keeps it, as `static/prerender.ts` does: a response that
+ * is not HTML for a path with an extension (`/sitemap.xml`, `/robots.txt`) is written as that file, and a path that ends
+ * in `.html` is written as it is. An HTML page for a dotted name (`/v1.2`) still gets its folder. Percent escapes are
+ * decoded once; a segment that could leave the folder or is too long is refused.
  *
  * @param clientDir The output folder.
  * @param path A URL path starting with `/`.
+ * @param contentType The `content-type` of the response, when it is known. Default `text/html`.
  * @returns The absolute file path.
  * @throws PrerenderError for a path that is not safe to write.
  * @since 1.0.0
  * @example prerenderFile("/app/dist/client", "/about"); // "/app/dist/client/about/index.html"
+ * @example prerenderFile("/app/dist/client", "/sitemap.xml", "application/xml"); // "/app/dist/client/sitemap.xml"
  */
-export function prerenderFile(clientDir: string, path: string): string {
+export function prerenderFile(clientDir: string, path: string, contentType = "text/html"): string {
   if (!path.startsWith("/") || path.length > MAX_PATH) {
     throw new PrerenderError(`"${path}" is not a valid path to prerender`);
   }
@@ -605,7 +609,11 @@ export function prerenderFile(clientDir: string, path: string): string {
     }
     segments.push(segment);
   }
-  const target = join(clientDir, ...segments, "index.html");
+  const last = segments[segments.length - 1];
+  const html = contentType.toLowerCase().startsWith("text/html");
+  const asFile =
+    last !== undefined && ((!html && last.includes(".")) || last.toLowerCase().endsWith(".html"));
+  const target = asFile ? join(clientDir, ...segments) : join(clientDir, ...segments, "index.html");
   const inside = relative(clientDir, target);
   if (escapesFolder(inside) || inside === "") {
     throw new PrerenderError(`"${path}" would be written outside the output folder`);
@@ -735,6 +743,32 @@ export async function prerenderPages(input: {
   const byPath = new Map(input.targets.map((target) => [target.path, target] as const));
   // Every listed path is checked before anything is rendered: an unsafe path fails the run at once.
   for (const target of input.targets) prerenderFile(input.clientDir, target.path);
+  // Two pages whose files differ only in case overwrite each other on a case-insensitive file system (macOS, Windows), so
+  // the build fails instead of shipping whichever was written last. The listed paths are checked before anything renders.
+  const claimFile = (
+    claimed: Map<string, { readonly path: string; readonly file: string }>,
+    path: string,
+    absolute: string,
+  ): string | undefined => {
+    const file = relative(input.clientDir, absolute);
+    const key = file.normalize("NFC").toLowerCase();
+    const known = claimed.get(key);
+    if (known === undefined) {
+      claimed.set(key, { path, file });
+      return undefined;
+    }
+    // The same file for `/a` and `/a/` is one page; the same file under another spelling is a collision.
+    if (known.file === file) return undefined;
+    const [first, second] = [known.path, path].sort();
+    return `"${first}" and "${second}" differ only in case: they would overwrite each other on a case-insensitive file system. Rename one of them, or leave one out of the prerender.`;
+  };
+  const listed = new Map<string, { readonly path: string; readonly file: string }>();
+  for (const target of input.targets) {
+    const message = claimFile(listed, target.path, prerenderFile(input.clientDir, target.path));
+    if (message !== undefined) throw new PrerenderError(message);
+  }
+  const written = new Map<string, { readonly path: string; readonly file: string }>();
+  const collisions: string[] = [];
 
   const renderOnce = async (path: string, from: string | undefined): Promise<Rendered> => {
     const target: PrerenderTarget = byPath.get(path) ?? { path, shell: false };
@@ -776,7 +810,13 @@ export async function prerenderPages(input: {
     }
     const type = response.headers.get("content-type") ?? "text/html";
     const html = await response.text();
-    const file = prerenderFile(input.clientDir, path);
+    const file = prerenderFile(input.clientDir, path, type);
+    const collision = claimFile(written, path, file);
+    if (collision !== undefined) {
+      // Not a failure `failOnError: false` may forgive: the page that lost would silently replace the other.
+      collisions.push(collision);
+      return { ok: false, retryable: false, message: collision };
+    }
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, html, "utf8");
     await input.options.onSuccess?.({ path, file, status: 200 });
@@ -821,6 +861,7 @@ export async function prerenderPages(input: {
             });
           },
   });
+  if (collisions.length > 0) throw new PrerenderError([...new Set(collisions)].sort().join("\n"));
   if (failures.length > 0 && failOnError) {
     throw new PrerenderError(describeFailures(failures, FIX));
   }

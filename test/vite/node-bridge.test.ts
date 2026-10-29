@@ -142,10 +142,11 @@ describe("dev node bridge", () => {
   });
 
   it("[SBRG-06] a request line the URL parser cannot use is a BadRequestError (400)", async () => {
+    // An absolute-form target with no host. (`//` used to be the example; it is a plain path now, see DUSK-VITE-REV-13.)
     const origin = await listen(() => new Response("never"));
     const url = new URL(origin);
     const answer = await new Promise<{ status: number; body: string }>((resolve, reject) => {
-      const req = httpRequest({ host: url.hostname, port: url.port, path: "//" }, (res) => {
+      const req = httpRequest({ host: url.hostname, port: url.port, path: "http://" }, (res) => {
         let body = "";
         res.on("data", (chunk) => {
           body += String(chunk);

@@ -122,6 +122,24 @@ describe("dusk build summary", () => {
     });
   });
 
+  it("[DUSK-R5-3] the summary carries the folder the build wrote (dist unless dusk({ outDir }) says otherwise)", async () => {
+    const { dir } = clientFolder(FILES);
+    const file = join(dir, "dusk-manifest.json");
+    writeFileSync(file, JSON.stringify(manifestOf()));
+    const manifest = await readBuildManifest(file);
+    if (manifest === undefined) throw new Error("the manifest was not read");
+    const base = {
+      version: "0.0.0",
+      manifest,
+      clientDir: dir,
+      report: undefined,
+      budgets: undefined,
+      ms: 10,
+    };
+    expect((await summarizeBuild(base)).outDir).toBe("dist");
+    expect((await summarizeBuild({ ...base, outDir: "build/out" })).outDir).toBe("build/out");
+  });
+
   it("[CLI-25] a page's kind: static file (also a pattern with a prerendered instance), ISR, client, dynamic", async () => {
     const { dir } = clientFolder(FILES);
     const file = join(dir, "dusk-manifest.json");

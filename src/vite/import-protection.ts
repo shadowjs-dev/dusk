@@ -108,6 +108,14 @@ export function aliasedPackageFolders(
   return [...folders];
 }
 
+/**
+ * True for a resolved id that names a file on disk, not one of Vite's stand-ins (`__vite-browser-external:fs`, a
+ * `\0` virtual id).
+ */
+function isRealFile(id: string): boolean {
+  return isAbsolute(id) && !id.startsWith("\0") && !id.includes("__vite-browser-external");
+}
+
 /** Line and column of the import of `specifier` in a file, or undefined. */
 function locate(file: string, specifier: string): { line: number; column: number } | undefined {
   if (file.startsWith("\0")) return undefined;
@@ -202,7 +210,11 @@ export function importProtection(getRoot: () => string, options: ImportProtectio
   /** Folders of the server-only packages when an alias points them elsewhere: an alias cannot hide them. */
   let packageFolders: readonly string[] = [];
 
-  const verdictForClient = (source: string, resolved: string | undefined): Verdict => {
+  const verdictForClient = (
+    source: string,
+    resolved: string | undefined,
+    polyfilled: boolean,
+  ): Verdict => {
     if (source === SERVER_ONLY_MARKER) {
       return { reason: `"${SERVER_ONLY_MARKER}" marks server code`, target: source };
     }
@@ -218,7 +230,7 @@ export function importProtection(getRoot: () => string, options: ImportProtectio
         };
       }
     }
-    if (isBuiltin(source)) {
+    if (isBuiltin(source) && !polyfilled) {
       return {
         reason: `the Node built-in "${source}" does not exist in the browser`,
         target: source,
@@ -277,9 +289,17 @@ export function importProtection(getRoot: () => string, options: ImportProtectio
 
       if (consumer === "client") {
         let resolved: string | undefined;
-        if (!SERVER_PACKAGES.has(source) && !isBuiltin(source)) {
+        // A bare name that is also a Node built-in (`events`, `buffer`, `path`) can be an installed package or an alias
+        // to a browser polyfill; Vite prefers it to its empty browser stand-in, and so does this check. Only `node:`
+        // names and built-ins that resolve to no file are the Node module.
+        let polyfilled = false;
+        if (!SERVER_PACKAGES.has(source) && !source.startsWith("node:")) {
           const found = await this.resolve(source, importer, { ...resolveOptions, skipSelf: true });
           resolved = found === null || found.external === true ? undefined : cleanId(found.id);
+          if (isBuiltin(source)) {
+            polyfilled = resolved !== undefined && isRealFile(resolved);
+            if (!polyfilled) resolved = undefined;
+          }
           if (
             !scanning &&
             resolved !== undefined &&
@@ -289,7 +309,7 @@ export function importProtection(getRoot: () => string, options: ImportProtectio
             clientParents.set(resolved, { importer: importerPath, specifier: source });
           }
         }
-        const verdict = verdictForClient(source, resolved);
+        const verdict = verdictForClient(source, resolved, polyfilled);
         if (verdict !== undefined && scanning) return externalForScan(source);
         if (verdict !== undefined) {
           const at = locate(importerPath, source);

@@ -203,7 +203,9 @@ export interface DuskDevConfig {
    * subdomains (also `.example.com`, Vite's spelling, which includes `example.com` itself). `true` accepts every
    * host: use it only on a machine nobody else can reach, because a page that any host can read is open to DNS rebinding.
    *
-   * The hosts the app declares in `security.allowedHosts` are always allowed in development; this list adds to them.
+   * The hosts the app declares in `security.allowedHosts` are always allowed in development; this list adds to them. It only
+   * opens Vite's check: the app's own host check still applies, so a name that is not in `security.allowedHosts` passes Vite
+   * and is then answered 400 by the handler.
    */
   readonly allowedHosts?: readonly string[] | true;
 }

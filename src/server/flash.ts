@@ -71,11 +71,13 @@ function summary(submission: WireSubmission): WireSubmission {
  * no flash. Called when a page renders.
  *
  * @param event The request.
+ * @param report Receives the error of a signed value that does not decode (the page renders without a flash).
  * @returns The payload, or `undefined` when there is none.
  * @internal
  */
 export async function takeFlash(
   event: Pick<RequestEvent, "cookies">,
+  report: (error: unknown) => void,
 ): Promise<FlashPayload | undefined> {
   if (event.cookies.get(FLASH_COOKIE) === undefined) return undefined;
   let value: string | undefined;
@@ -91,8 +93,10 @@ export async function takeFlash(
   let decoded: unknown;
   try {
     decoded = deserialize(new TextDecoder().decode(bytes));
-  } catch {
-    // A signed value that does not decode was written by another version: it reads as no flash.
+  } catch (error) {
+    // A signed value that does not decode was written by another version (or another codec): it reads as no flash. It is
+    // reported, because the signature says this server wrote it.
+    report(error);
     return undefined;
   }
   return typeof decoded === "object" && decoded !== null ? (decoded as FlashPayload) : undefined;

@@ -84,7 +84,9 @@ export function buildCsp(options: CspOptions, nonce: string | undefined): string
   const parts: string[] = [];
   for (const [name, sources] of merged) {
     if (!DIRECTIVE_NAME.test(name))
-      throw new TypeError(`CSP directive ${JSON.stringify(name)} is invalid.`);
+      throw new TypeError(
+        __DEV__ ? `CSP directive ${JSON.stringify(name)} is invalid.` : "DUSK_CSP_1",
+      );
     if (sources === true) {
       parts.push(name);
       continue;
@@ -93,11 +95,15 @@ export function buildCsp(options: CspOptions, nonce: string | undefined): string
     const written = sources.map((source) => {
       if (source === NONCE_TOKEN) {
         if (nonce === undefined)
-          throw new TypeError("CSP uses {nonce} but the request has no nonce.");
+          throw new TypeError(
+            __DEV__ ? "CSP uses {nonce} but the request has no nonce." : "DUSK_CSP_3",
+          );
         return `'nonce-${nonce}'`;
       }
       if (source === "" || isForbiddenSource(source)) {
-        throw new TypeError(`CSP source ${JSON.stringify(source)} in ${name} is invalid.`);
+        throw new TypeError(
+          __DEV__ ? `CSP source ${JSON.stringify(source)} in ${name} is invalid.` : "DUSK_CSP_4",
+        );
       }
       return source;
     });
@@ -106,7 +112,9 @@ export function buildCsp(options: CspOptions, nonce: string | undefined): string
   const header = parts.join("; ");
   if (header.length > MAX_CSP_LENGTH) {
     throw new RangeError(
-      `CSP header is ${header.length} characters; the limit is ${MAX_CSP_LENGTH}.`,
+      __DEV__
+        ? `CSP header is ${header.length} characters; the limit is ${MAX_CSP_LENGTH}.`
+        : "DUSK_CSP_2",
     );
   }
   return header;

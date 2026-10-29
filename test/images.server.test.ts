@@ -153,7 +153,7 @@ describe("image optimizer endpoint", () => {
     expect(await response.text()).not.toContain("secret");
   });
 
-  it("[IMG-18] only GET is answered", async () => {
+  it("[IMG-18] only GET and HEAD are answered", async () => {
     const handler = handlerWith({ source: local });
     const response = await handler.fetch(
       new Request("https://example.com/_dusk/image?url=%2Fhero.png&w=640&q=75", {

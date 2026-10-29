@@ -1,12 +1,12 @@
 import { createMatcher } from "@shadow-js/router/core";
 import { HttpError } from "../internal/http-error";
-import { runMiddleware } from "../server/api";
 import { resolveClientAddress } from "../server/client-address";
 import { runWithEvent } from "../server/context";
 import { RequestTimeoutError } from "../server/errors";
 import { EventState } from "../server/event";
 import { bindFailureMapper } from "../server/failure";
 import type { DuskFeature, StreamHit } from "../server/features";
+import { runMiddleware } from "../server/middleware-chain";
 import { isLoopback, peerOf } from "../server/request-env";
 import { rewriteOf } from "../server/rewrite";
 import { sseResponse } from "../server/sse";

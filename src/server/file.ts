@@ -1,3 +1,5 @@
+import { selectRange } from "../shared/byte-range";
+
 /** Options of {@link file}. @since 1.0.0 */
 export interface FileOptions {
   /**
@@ -63,15 +65,22 @@ export function file(
 
   let range: { start: number; end: number } | undefined;
   if (request !== undefined && readable) {
-    const header = request.headers.get("range");
-    if (header !== null && rangeApplies(request, options)) {
-      const parsed = parseRange(header, size);
-      if (parsed === "unsatisfiable") {
-        headers.set("content-range", `bytes */${size}`);
-        return new Response(null, { status: 416, headers });
-      }
-      if (parsed !== null) range = parsed;
+    // `If-Range` needs a strong validator: a weak entity tag never matches, and a date only counts when the file did not
+    // change in the last second. A header that is not one valid range is ignored (the whole file); a range outside the
+    // file is 416.
+    const selected = selectRange(
+      request.headers.get("range") ?? undefined,
+      request.headers.get("if-range") ?? undefined,
+      options.etag,
+      options.lastModified?.getTime(),
+      size,
+      Date.now(),
+    );
+    if (selected === "unsatisfiable") {
+      headers.set("content-range", `bytes */${size}`);
+      return new Response(null, { status: 416, headers });
     }
+    if (selected !== null) range = selected;
   }
 
   if (range !== undefined) {
@@ -147,45 +156,6 @@ function noneMatches(header: string, etag: string): boolean {
   return (
     header.trim() === "*" || header.split(",").some((candidate) => strip(candidate) === strip(etag))
   );
-}
-
-/**
- * Whether `If-Range` lets the `Range` through: absent, or equal to the entity tag or to the modification time. A
- * different validator means the client's copy is stale, so the whole file is sent.
- */
-function rangeApplies(request: Request, options: FileOptions): boolean {
-  const ifRange = request.headers.get("if-range");
-  if (ifRange === null) return true;
-  if (options.etag !== undefined) return ifRange.trim() === options.etag;
-  if (options.lastModified === undefined) return false;
-  return Date.parse(ifRange) === Math.floor(options.lastModified.getTime() / 1000) * 1000;
-}
-
-/**
- * One byte range of a `bytes=` Range header (not a list of them: a multi-range request is answered with the whole file).
- * Returns `null` for a header to ignore, `"unsatisfiable"` for a range outside the file.
- */
-function parseRange(
-  header: string,
-  size: number,
-): { start: number; end: number } | "unsatisfiable" | null {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-  if (match === null) return null;
-  const [, first = "", last = ""] = match;
-  if (first === "" && last === "") return null;
-  let start: number;
-  let end: number;
-  if (first === "") {
-    const suffix = Number(last);
-    if (suffix === 0) return "unsatisfiable";
-    start = Math.max(0, size - suffix);
-    end = size - 1;
-  } else {
-    start = Number(first);
-    end = last === "" ? size - 1 : Math.min(Number(last), size - 1);
-  }
-  if (start >= size || start > end) return "unsatisfiable";
-  return { start, end };
 }
 
 /** The bytes (or the blob) from `start` to `end`, both inclusive. */

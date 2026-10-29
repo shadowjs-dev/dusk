@@ -32,3 +32,39 @@ export function isInsideFolder(root: string, target: string, path: PathApi = nod
   const relative = path.relative(path.resolve(root), path.resolve(target));
   return relative !== "" && !escapesFolder(relative, path);
 }
+
+/**
+ * Why an adapter may not empty and write `outDir`, or `undefined` when it may. The build removes the adapter's folder
+ * before it runs the adapter, so a folder that is, or holds, the build output or the source folder would delete the
+ * bundles the adapter is about to copy, or the app itself. A folder inside `client/` or `server/` would be emptied with
+ * the next build of that bundle.
+ *
+ * @param outDir Absolute adapter output folder.
+ * @param build Absolute build output folder (the `outDir` of `dusk()`).
+ * @param srcDir Absolute source folder.
+ * @param path The path functions to resolve with. Default: this machine's.
+ * @returns A sentence naming the overlap, or `undefined`.
+ * @example adapterOutDirConflict("/app/dist", "/app/dist", "/app/src"); // "it is the build output folder"
+ * @since 1.0.0
+ */
+export function adapterOutDirConflict(
+  outDir: string,
+  build: string,
+  srcDir: string,
+  path: PathApi = nodePath,
+): string | undefined {
+  const same = (a: string, b: string): boolean =>
+    path.relative(path.resolve(a), path.resolve(b)) === "";
+  // `outDir` holds `folder` when `folder` is `outDir` itself or below it.
+  const holds = (folder: string): boolean =>
+    same(outDir, folder) || isInsideFolder(outDir, folder, path);
+  // `folder` holds `outDir` when `outDir` is `folder` itself or below it.
+  const inside = (folder: string): boolean =>
+    same(folder, outDir) || isInsideFolder(folder, outDir, path);
+  if (holds(build)) return "it holds the build output folder";
+  if (holds(srcDir)) return "it holds the source folder";
+  if (inside(path.join(build, "client")) || inside(path.join(build, "server"))) {
+    return "it sits inside the client or server bundle of the build";
+  }
+  return undefined;
+}

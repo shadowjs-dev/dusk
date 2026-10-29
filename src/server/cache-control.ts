@@ -41,7 +41,11 @@ const TOKEN = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
 
 function seconds(where: string, value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_AGE) {
-    throw new TypeError(`${where} must be an integer number of seconds from 0 to ${MAX_AGE}.`);
+    throw new TypeError(
+      __DEV__
+        ? `${where} must be an integer number of seconds from 0 to ${MAX_AGE}.`
+        : `DUSK_CC_3 ${where}`,
+    );
   }
   return value;
 }
@@ -64,15 +68,21 @@ export function resolveCacheControl(
   if (option === undefined || option === "no-store") return { kind: "no-store" };
   if (typeof option !== "object" || option === null) {
     throw new TypeError(
-      'cacheControl must be "no-store" or an object of visibility, maxAge, staleWhileRevalidate, vary.',
+      __DEV__
+        ? 'cacheControl must be "no-store" or an object of visibility, maxAge, staleWhileRevalidate, vary.'
+        : "DUSK_CC_1",
     );
   }
   const visibility = option.visibility ?? "private";
   if (visibility !== "public" && visibility !== "private")
-    throw new TypeError('cacheControl.visibility must be "public" or "private".');
+    throw new TypeError(
+      __DEV__ ? 'cacheControl.visibility must be "public" or "private".' : "DUSK_CC_5",
+    );
   if (visibility === "public" && method === "POST") {
     throw new TypeError(
-      "cacheControl: a POST function cannot be public (a shared cache would answer a write); use private or no-store.",
+      __DEV__
+        ? "cacheControl: a POST function cannot be public (a shared cache would answer a write); use private or no-store."
+        : "DUSK_CC_2",
     );
   }
   let maxAge = option.maxAge === undefined ? 0 : seconds("cacheControl.maxAge", option.maxAge);
@@ -87,7 +97,9 @@ export function resolveCacheControl(
   }
   const vary = (option.vary ?? []).map((name) => {
     if (typeof name !== "string" || !TOKEN.test(name))
-      throw new TypeError(`cacheControl.vary: ${JSON.stringify(name)} is not a header name.`);
+      throw new TypeError(
+        __DEV__ ? `cacheControl.vary: ${JSON.stringify(name)} is not a header name.` : "DUSK_CC_4",
+      );
     return name.toLowerCase();
   });
   return { kind: "cache", visibility, maxAge, staleWhileRevalidate: swr, vary };

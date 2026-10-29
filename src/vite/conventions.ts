@@ -187,7 +187,15 @@ function filesOf(srcDir: string): string[] {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-  return names.sort().filter((name) => statSync(join(srcDir, name)).isFile());
+  return names.sort().filter((name) => {
+    try {
+      return statSync(join(srcDir, name)).isFile();
+    } catch (error) {
+      // A link to a file that is gone (or a file removed since the listing) is no convention; any other failure is real.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  });
 }
 
 /** The names of the files directly inside a folder, sorted; a folder that does not exist has none. */
@@ -511,7 +519,8 @@ export async function discoverConventions(
     const base = name.slice(0, name.length - extension.length);
     const file = join(srcDir, name);
     const claim = seen.get(base);
-    if (MODULE_CONVENTIONS[base] !== undefined && MODULE_EXTENSIONS.includes(extension)) {
+    // Own keys only: a file named `constructor` or `toString` is not a convention (the tables inherit from Object).
+    if (Object.hasOwn(MODULE_CONVENTIONS, base) && MODULE_EXTENSIONS.includes(extension)) {
       if (claim !== undefined)
         throw new ConventionError(`two files define the ${base} convention: ${claim} and ${file}.`);
       seen.set(base, file);
@@ -526,7 +535,7 @@ export async function discoverConventions(
       }
       continue;
     }
-    const statics = STATIC_CONVENTIONS[base];
+    const statics = Object.hasOwn(STATIC_CONVENTIONS, base) ? STATIC_CONVENTIONS[base] : undefined;
     if (statics?.extensions.includes(extension)) {
       if (claim !== undefined)
         throw new ConventionError(`two files define the ${base} convention: ${claim} and ${file}.`);

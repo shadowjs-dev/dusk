@@ -50,7 +50,9 @@ function seconds(where: string, value: unknown, minimum: number): number {
     value > MAX_SECONDS
   ) {
     throw new TypeError(
-      `${where} must be an integer number of seconds from ${minimum} to ${MAX_SECONDS}.`,
+      __DEV__
+        ? `${where} must be an integer number of seconds from ${minimum} to ${MAX_SECONDS}.`
+        : `DUSK_CACHE_5 ${where}`,
     );
   }
   return value;
@@ -70,11 +72,16 @@ function seconds(where: string, value: unknown, minimum: number): number {
 export function resolveCacheLife(custom: unknown): Readonly<Record<string, CacheLifeProfile>> {
   const profiles: Record<string, CacheLifeProfile> = { ...CACHE_LIFE_PRESETS };
   if (custom === undefined) return profiles;
-  if (!isRecord(custom)) throw new TypeError("cacheLife must be an object of named profiles.");
+  if (!isRecord(custom))
+    throw new TypeError(
+      __DEV__ ? "cacheLife must be an object of named profiles." : "DUSK_CACHE_2",
+    );
   for (const [name, value] of Object.entries(custom)) {
     if (!PROFILE_NAME.test(name)) {
       throw new TypeError(
-        `cacheLife: the profile name ${JSON.stringify(name)} must be lowercase letters, digits and dashes (name).`,
+        __DEV__
+          ? `cacheLife: the profile name ${JSON.stringify(name)} must be lowercase letters, digits and dashes (name).`
+          : "DUSK_CACHE_3",
       );
     }
     const where = `cacheLife.${name}`;
@@ -83,7 +90,11 @@ export function resolveCacheLife(custom: unknown): Readonly<Record<string, Cache
     const revalidate = seconds(`${where}.revalidate`, value["revalidate"], 1);
     const expire = seconds(`${where}.expire`, value["expire"], 0);
     if (expire < revalidate) {
-      throw new TypeError(`${where}.expire must be at least revalidate (${revalidate} seconds).`);
+      throw new TypeError(
+        __DEV__
+          ? `${where}.expire must be at least revalidate (${revalidate} seconds).`
+          : `DUSK_CACHE_1 ${where}`,
+      );
     }
     profiles[name] = { stale, revalidate, expire };
   }
@@ -106,7 +117,9 @@ export function cacheLifeOf(
   const found = Object.hasOwn(profiles, name) ? profiles[name] : undefined;
   if (found === undefined) {
     throw new TypeError(
-      `cacheLife profile "${name}" is not defined (known: ${Object.keys(profiles).join(", ")}).`,
+      __DEV__
+        ? `cacheLife profile "${name}" is not defined (known: ${Object.keys(profiles).join(", ")}).`
+        : "DUSK_CACHE_4",
     );
   }
   return found;

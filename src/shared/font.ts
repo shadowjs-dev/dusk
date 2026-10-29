@@ -61,6 +61,21 @@ const FORMATS: ReadonlySet<string> = new Set([
 ]);
 const DISPLAYS: ReadonlySet<string> = new Set(["auto", "block", "swap", "fallback", "optional"]);
 
+const STYLES: ReadonlySet<string> = new Set(["normal", "italic", "oblique"]);
+/** A weight: a keyword or a number from 1 to 1000, or a range of two numbers (a variable font's axis). */
+const WEIGHT =
+  /^(?:normal|bold|(?:[1-9]\d{0,2}|1000)(?:\.\d+)?(?:\s+(?:[1-9]\d{0,2}|1000)(?:\.\d+)?)?)$/;
+
+/** The `font-weight` text; anything else could end the declaration, the rule or the style element it is written into. */
+function weightText(weight: string | number): string {
+  const text = String(weight);
+  if (!WEIGHT.test(text))
+    throw new TypeError(
+      `fontFace: weight ${JSON.stringify(text)} must be normal, bold, a number from 1 to 1000, or a range of two numbers.`,
+    );
+  return text;
+}
+
 /** A CSS string literal for a name, refusing anything that could end the string or the rule. */
 function cssName(name: string, what: string): string {
   if (name.length === 0 || name.length > 100 || hasControl(name) || /["';{}<>\\]/.test(name)) {
@@ -140,8 +155,12 @@ export function fontFace(options: FontFaceOptions): string {
     `font-family: ${cssName(options.family, "the family name")}`,
     `src: ${sources.join(", ")}`,
   ];
-  if (options.weight !== undefined) parts.push(`font-weight: ${String(options.weight)}`);
-  if (options.style !== undefined) parts.push(`font-style: ${options.style}`);
+  if (options.weight !== undefined) parts.push(`font-weight: ${weightText(options.weight)}`);
+  if (options.style !== undefined) {
+    if (!STYLES.has(options.style))
+      throw new TypeError(`fontFace: ${JSON.stringify(options.style)} is not a font style.`);
+    parts.push(`font-style: ${options.style}`);
+  }
   if (options.stretch !== undefined) {
     if (!/^(?:\d+(?:\.\d+)?%)(?:\s+\d+(?:\.\d+)?%)?$/.test(options.stretch)) {
       throw new TypeError(

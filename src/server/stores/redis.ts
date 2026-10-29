@@ -55,6 +55,12 @@ export interface RedisStoreOptions {
   readonly tagTtlSeconds?: number;
   /** Epoch milliseconds now, for the lifetime of an entry. Default `Date.now`. */
   readonly now?: () => number;
+  /**
+   * Receives the `SyntaxError` of a stored string that is not JSON (a damaged or foreign value under the store's prefix).
+   * The entry reads as a miss either way. An entry of another format version is not an error and is not reported.
+   * Default: none.
+   */
+  readonly report?: (error: unknown) => void;
 }
 
 /** A {@link CacheStore} that purges a tag by itself. @since 1.0.0 */
@@ -84,12 +90,16 @@ async function inBatches<T>(
  * The parsed entry of a stored string, or `undefined` for anything this version does not understand (not JSON, no
  * version tag, another version, a malformed entry).
  */
-function decode(text: string | null): CacheEntry | undefined {
+function decode(
+  text: string | null,
+  report: ((error: unknown) => void) | undefined,
+): CacheEntry | undefined {
   if (text === null) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch {
+  } catch (error) {
+    report?.(error);
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) return undefined;
@@ -116,6 +126,7 @@ export function redisStore(client: RedisClient, options: RedisStoreOptions = {})
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const maxEntryBytes = options.maxEntryBytes ?? DEFAULT_MAX_ENTRY_BYTES;
   const now = options.now ?? Date.now;
+  const report = options.report;
   if (!Number.isInteger(maxEntryBytes) || maxEntryBytes < 1) {
     throw new RangeError("redisStore: maxEntryBytes must be a positive integer.");
   }
@@ -137,13 +148,13 @@ export function redisStore(client: RedisClient, options: RedisStoreOptions = {})
    */
   const unindex = async (tag: string, key: string): Promise<void> => {
     await client.sRem(tagKey(tag), key);
-    const again = decode(await client.get(entryKey(key)));
+    const again = decode(await client.get(entryKey(key)), report);
     if (again?.tags.includes(tag) === true) await client.sAdd(tagKey(tag), key);
   };
 
   const store: RedisCacheStore = {
     async get(key) {
-      return decode(await client.get(entryKey(key)));
+      return decode(await client.get(entryKey(key)), report);
     },
     async set(key, entry) {
       const text = JSON.stringify({ v: FORMAT_VERSION, e: entry });
@@ -174,7 +185,7 @@ export function redisStore(client: RedisClient, options: RedisStoreOptions = {})
       await Promise.all(tags.map((tag) => client.sAdd(tagKey(tag), key)));
     },
     async delete(key) {
-      const previous = decode(await client.get(entryKey(key)));
+      const previous = decode(await client.get(entryKey(key)), report);
       await client.del(entryKey(key));
       if (previous !== undefined) await Promise.all(previous.tags.map((tag) => unindex(tag, key)));
     },
@@ -182,7 +193,7 @@ export function redisStore(client: RedisClient, options: RedisStoreOptions = {})
       const members = await client.sMembers(tagKey(tag));
       const live: string[] = [];
       await inBatches(members, async (member) => {
-        const entry = decode(await client.get(entryKey(member)));
+        const entry = decode(await client.get(entryKey(member)), report);
         if (entry?.tags.includes(tag) === true) live.push(member);
         else await unindex(tag, member);
       });
@@ -191,7 +202,7 @@ export function redisStore(client: RedisClient, options: RedisStoreOptions = {})
     async purgeTag(tag) {
       const members = await client.sMembers(tagKey(tag));
       await inBatches(members, async (member) => {
-        const entry = decode(await client.get(entryKey(member)));
+        const entry = decode(await client.get(entryKey(member)), report);
         if (entry?.tags.includes(tag) === true) await client.del(entryKey(member));
         await unindex(tag, member);
       });

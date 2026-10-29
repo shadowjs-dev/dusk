@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.0.2
+
+### Fixed
+
+- `useServiceWorkerUpdate().update()` can run again when the new worker never takes control (it was discarded or ignored the message): the lock now ends after ten seconds, when the waiting worker disappears, or when `postMessage` throws. The update state belongs to the page's `ServiceWorkerContainer` instead of the module.
+- `createOidcClient` has a `report` option; a refresh token that could not be revoked at sign-out goes to it (default `console.error`) instead of being dropped. A refreshed ID token is compared with the subject of the stored user, or of the ID token stored at sign-in when the user is missing from the session; with neither it is refused (`OIDC_ID_TOKEN_INVALID`).
+- `createSseClient` stops on a 204, retries a 408, a 429 and every 5xx (a 5xx used to end the client), and waits at least the `Retry-After` of the answer (at most five minutes).
+- Static files (the Node server, the Bun and Deno layer, and `file()`) read `Range` and `If-Range` as RFC 9110 says: `bytes=5-2` is invalid and ignored (200, not 416), a weak entity tag never satisfies `If-Range`, and a date only does when it equals an `Last-Modified` that is at least a second old. The Bun and Deno servers now answer byte ranges.
+- The prerender step of `dusk build` writes a non-HTML response for a path with an extension (`/sitemap.xml`, `/robots.txt`) as that file instead of `sitemap.xml/index.html`, and fails the build when two prerendered paths differ only in case. `prerenderFile` takes an optional content type.
+- `dusk build` records its output folder in `.dusk/build.json`, and `dusk start` serves it (`dusk({ outDir })` is no longer ignored); `dusk start --dir <folder>` names a folder, and `dist` stays the default.
+- The image variants step reports a folder it cannot read (permissions, I/O) instead of treating it as empty. The server function scan warns through the build logger when it stops at 20 000 files or skips a file over 2 MB that declares server functions.
+- `cacheData` and `cachedFetch` treat a data cache store that fails (read or write) as a miss: the error goes to `report` and the loader's value is returned, as the page cache does.
+- A signed flash cookie that does not decode is reported (phase `render`). `redisStore` takes a `report` option for a stored string that is not JSON. `safeImageFetch` takes a `report` option for a response header the Fetch API refuses, and `serve({ workers })` logs a failed call to a worker that is not just gone.
+- `<Image unoptimized>` checks `width` and `height` (finite, greater than 0) and refuses a `javascript:`, `vbscript:` or other script-bearing source; `data:image/*`, `blob:`, http(s) and relative sources are served as given.
+- A WebSocket upgrade on the Node server behind `trustProxy` is judged on the forwarded host and protocol, as a plain request is; before, the origin check compared the browser's `Origin` with the internal address and refused every browser.
+- `<Image alt="">` writes `alt=""` again: an empty `alt` marks a decorative image, and dropping it made screen readers announce the file name.
+- `islandAttributes` checks that the props are plain data iteratively: props nested 100,000 levels deep are refused with the size-limit `RangeError` instead of overflowing the stack (cycles and bad values are still named by path).
+- `dusk build` prints the real build folder (`dusk({ outDir })`) in the summary, the phase rows and the `node <adapter outDir>/server.mjs` hint instead of always `dist`; the JSON summary carries it as `outDir`.
+- A server function call whose input cannot be serialized, made in the same tick as other calls, now rejects alone; before, it left every call batched with it pending forever.
+- The submission store's revalidator stays `loading` until every overlapping revalidation has finished.
+- `<Form>` submitted by JavaScript now sends the name and value of the button that was pressed, as a plain browser submit does.
+- Islands with the `idle` strategy cancel their idle callback with `cancelIdleCallback` when disposed, instead of `clearTimeout` on an id from another id space.
+- `requireUser`'s login redirect appends `returnTo` with `&` when the login path already has a query.
+- `fontFace` refuses a `weight` or `style` that could end the declaration or the style element it is written into.
+- `scriptTag` and `imageProps` refuse a source with a tab or line break inside (`/<TAB>/host` reads as `//host` in a browser).
+- The file KV store no longer deletes a value written by `set` while it was removing the expired entry it had just read, and `list` skips a file that is not an entry instead of throwing.
+- A refused WebSocket upgrade on the Node server no longer writes a second `Content-Length`, `Transfer-Encoding` or `Connection` header when the response brought its own.
+- The Bun and Deno servers report a missing `static` folder once at start-up and send requests to the handler, instead of an unhandled rejection and a 500 for every request.
+- `dusk build` with an `outDir` outside the app no longer writes a marker that `dusk start` refuses and that `dusk build` could never fix: it says the folder could not be recorded and to pass `--dir` to `dusk start`.
+- A single-flight server function runs the middleware of the page named in `x-dusk-location` before its loaders, so a visitor can no longer read the loader data of a page whose `_middleware` or `middleware` refuses them; the loaders also see the `locals` the app-wide middleware set.
+- A redirect whose target holds an emoji or a lone surrogate answers a 302 with the text percent-encoded instead of throwing, and a form post that redirects to a non-Latin-1 path answers a 303 instead of a 500.
+- `security.cors` adds `Vary: Origin` to every API answer (also to an unlisted or missing origin) and keeps it when the route sets a `Vary` of its own.
+- A page served from the cache with a CSP nonce no longer answers 304 to a matching `If-None-Match`: the stored body would carry the old nonce under the new policy.
+- A WebSocket message is limited in its number of fragments, so endless empty continuation frames cannot grow the reader's memory without bound (close code 1009).
+- `cachedFetch` in draft mode keeps the checks, the error on a non-OK answer and the text or JSON parsing of a normal call.
+- The image endpoint answers `HEAD`, and the global error document escapes the language it wraps in `<html lang>`.
+- `dusk({ outDir })` refuses the project root, a folder that holds the source folder, and a Windows drive path (the build empties `outDir`); an adapter whose folder is, or holds, the build output or the sources fails with a message before it empties anything.
+- `dusk build` reads the manifest from the folder `dusk({ outDir })` names, not always from `dist`.
+- A source file named like an `Object.prototype` member (`src/constructor.ts`, `src/toString.png`) or a dangling link at the top of `src` no longer fails the convention scan.
+- An env variable named `constructor` or `toString` in an `.env` file no longer crashes the build; a relative `envDir` is read from the project root.
+- The deployment id fails when the source folder cannot be listed instead of hashing a partial listing.
+- The dev server serves page routes whose URL starts with `/@` or `/__` (such as `/@me`) and builds a request URL from the Host header even for a target that starts with `//`.
+- The dev watcher registers server functions only from the files the build scan reads (not tests, declarations or markdown).
+- Import protection accepts a built-in name that resolves to an installed polyfill or an alias (`events`, `buffer`); `node:` names and unresolved built-ins are still refused.
+- `dusk dev` bounds the memory of `warnOnce` messages.
+- `imageVariants()` warns through the Vite logger when it stops reading the project: more than 20,000 source files under `src/`, a source file over 1 MiB (named), or more than 100,000 images in `public/`. Before, it skipped them silently and the images they referenced were served unprepared.
+
 ## 1.0.1
 
 ### Added

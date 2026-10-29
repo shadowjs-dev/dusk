@@ -270,7 +270,9 @@ export function enhanceForm(form: HTMLFormElement, options: EnhanceOptions): () 
     if (event.defaultPrevented) return;
     options.onSubmit?.(event);
     if (event.defaultPrevented) return;
-    const data = new FormData(form);
+    // A plain browser submit includes the name and value of the button that was pressed (`intent=delete`); the form's
+    // own elements do not list it, so it is passed along (`undefined` for an event made by hand).
+    const data = new FormData(form, (event as SubmitEvent).submitter);
     if (method === "get") {
       if (options.navigate === undefined || options.href === undefined) return;
       event.preventDefault();

@@ -38,6 +38,8 @@ export interface RouteRow {
 /** What the summary shows. @since 1.0.0 */
 export interface BuildSummary {
   readonly version: string;
+  /** The folder the build wrote, relative to the app, with `/` separators. Default `dist`. */
+  readonly outDir?: string;
   readonly steps: readonly BuildStep[];
   readonly prerendered: number;
   readonly secretScan: { readonly enabled: boolean; readonly scanned: number };
@@ -56,6 +58,8 @@ export interface BuildSummaryInput {
   readonly manifest: BuiltManifest;
   /** The client folder of the build, absolute. */
   readonly clientDir: string;
+  /** The folder the build wrote, relative to the app (`dusk({ outDir })`). Default `dist`. */
+  readonly outDir?: string;
   readonly report: BuildReport | undefined;
   readonly budgets: DuskBuildBudgets | undefined;
   readonly ms: number;
@@ -242,6 +246,7 @@ export async function summarizeBuild(input: BuildSummaryInput): Promise<BuildSum
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return {
     version: input.version,
+    outDir: input.outDir ?? "dist",
     steps: input.report?.steps ?? [],
     prerendered: input.report?.prerendered ?? manifest.prerendered.length,
     secretScan: input.report?.secretScan ?? { enabled: false, scanned: 0 },

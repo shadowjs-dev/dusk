@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, realpath } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { ModuleParseError } from "@shadow-js/router/vite";
 import { ServerFnError, type ServerFnInfo, transformServerFns } from "./server-fn";
 
@@ -71,9 +71,36 @@ export interface ServerFnRecord {
  */
 export type ServerFnCache = Map<string, readonly ServerFnInfo[]>;
 
+/** Receives a note about a file the scan skipped or a limit it hit. @internal */
+export type ScanWarn = (message: string) => void;
+
+function warnOnConsole(message: string): void {
+  console.warn(`[dusk] ${message}`);
+}
+
 function isCandidate(name: string): boolean {
   if (name.endsWith(".d.ts") || name.includes(".test.") || name.includes(".spec.")) return false;
   return SOURCE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
+
+/**
+ * True for a file the server function scan reads: a source file that is not a type declaration or a test, outside
+ * dot-folders and `node_modules`. The dev watcher asks the same question the scan answers, so a file the build ignores
+ * is not registered in development either.
+ *
+ * @param srcDir The absolute source folder.
+ * @param file The absolute path of a file the watcher reported.
+ * @returns Whether the scan would read it.
+ * @example isServerFnSource("/app/src", "/app/src/server/posts.ts"); // true; "/app/src/a.test.ts" is false
+ * @internal
+ * @since 1.0.0
+ */
+export function isServerFnSource(srcDir: string, file: string): boolean {
+  const parts = relative(srcDir, file).split(sep);
+  const name = parts[parts.length - 1] ?? "";
+  if (parts[0] === ".." || parts.some((part) => part === "") || !isCandidate(name)) return false;
+  // The scan skips every dot-name, a file's included, and `node_modules`.
+  return parts.every((part) => !part.startsWith(".") && part !== "node_modules");
 }
 
 async function* walk(directory: string): AsyncGenerator<string> {
@@ -107,6 +134,7 @@ async function* walk(directory: string): AsyncGenerator<string> {
  * @param file Absolute path.
  * @param root Project root.
  * @param cache Memory keyed by content.
+ * @param warn Told about a file that is skipped because it is too big. Default: `console.warn`.
  * @returns The server functions of the file; none for a file that mentions neither form.
  * @throws ServerFnError for a server function the build cannot compile.
  * @since 1.0.0
@@ -117,10 +145,20 @@ export async function analyzeFile(
   file: string,
   root: string,
   cache: ServerFnCache,
+  warn: ScanWarn = warnOnConsole,
 ): Promise<readonly ServerFnInfo[]> {
   const code = await readFile(file, "utf8");
-  if (code.length > MAX_FILE_BYTES) return [];
-  if (!code.includes("serverFn") && !code.includes("use server")) return [];
+  const mentions = code.includes("serverFn") || code.includes("use server");
+  if (code.length > MAX_FILE_BYTES) {
+    // A big generated data file is no concern; a big file with server functions would lose them without a word.
+    if (mentions) {
+      warn(
+        `${relative(root, file)} is over ${MAX_FILE_BYTES / 1024 / 1024} MB, so it was not scanned for server functions; any it declares are not registered. Split the file.`,
+      );
+    }
+    return [];
+  }
+  if (!mentions) return [];
   const key = createHash("sha1")
     .update(relative(root, file))
     .update("\0")
@@ -140,6 +178,8 @@ export async function analyzeFile(
  *
  * @param layout The project layout.
  * @param cache Memory of analyzed files.
+ * @param warn Told when the scan stops at the file limit or skips a file that is too big (the build passes its logger).
+ *   Default: `console.warn`.
  * @returns Records sorted by file and line.
  * @throws ServerFnError for a server function that cannot be compiled, or two functions with the
  *   same id (`SERVER_FN_ID_COLLISION`).
@@ -149,6 +189,7 @@ export async function analyzeFile(
 export async function scanServerFns(
   layout: ProjectLayout,
   cache: ServerFnCache,
+  warn: ScanWarn = warnOnConsole,
 ): Promise<ServerFnRecord[]> {
   const records: ServerFnRecord[] = [];
   let count = 0;
@@ -161,12 +202,18 @@ export async function scanServerFns(
   }
   for await (const real of walk(base)) {
     count += 1;
-    if (count > MAX_FILES) break;
+    if (count > MAX_FILES) {
+      warn(
+        `the source folder has more than ${MAX_FILES} source files; only the first ${MAX_FILES} (in name order) were scanned for server functions, so the others are not registered. Move generated or vendored files out of ${relative(layout.root, layout.srcDir) || "the source folder"}.`,
+      );
+      break;
+    }
     // The logical path (under `layout.root`, symlinks not resolved) keeps ids independent of
     // where the project folder happens to be linked from.
     const file = join(layout.srcDir, relative(base, real));
     try {
-      for (const fn of await analyzeFile(file, layout.root, cache)) records.push({ file, fn });
+      for (const fn of await analyzeFile(file, layout.root, cache, warn))
+        records.push({ file, fn });
     } catch (error) {
       if (error instanceof ModuleParseError) continue;
       throw error;

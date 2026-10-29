@@ -35,7 +35,9 @@ export function requireUser(
     if (user === undefined) {
       if (options.loginPath !== undefined && (event.method === "GET" || event.method === "HEAD")) {
         const wanted = `${event.url.pathname}${event.url.search}`;
-        throw redirect(`${options.loginPath}?returnTo=${encodeURIComponent(wanted)}`, {
+        // A login path that already has a query (`/login?lang=fr`) takes `returnTo` after it.
+        const join = options.loginPath.includes("?") ? "&" : "?";
+        throw redirect(`${options.loginPath}${join}returnTo=${encodeURIComponent(wanted)}`, {
           status: 303,
         });
       }

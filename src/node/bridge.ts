@@ -31,8 +31,9 @@ function occurrences(rawHeaders: readonly string[], name: string): number {
  * Rightmost value of a possibly comma-separated forwarded header. The client controls the left
  * end of the list; the nearest trusted proxy appends its own value on the right, so only that
  * one is believed.
+ * @internal
  */
-function lastValue(value: string | string[] | undefined): string | undefined {
+export function lastValue(value: string | string[] | undefined): string | undefined {
   const text = Array.isArray(value) ? value[value.length - 1] : value;
   const parts = text?.split(",") ?? [];
   const last = parts[parts.length - 1]?.trim();

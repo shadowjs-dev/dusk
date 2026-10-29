@@ -32,6 +32,11 @@ export interface SafeImageFetchOptions {
    * @internal
    */
   readonly refuse?: (address: string) => boolean;
+  /**
+   * Receives the `TypeError` of a response header the Fetch API refuses (the header is dropped and the answer is judged on
+   * the others). Called at most once per response. Default: none.
+   */
+  readonly report?: (error: unknown) => void;
 }
 
 const HTTP_MODULE = "node:http";
@@ -50,6 +55,33 @@ type LookupCallback = (
 
 interface LookupOptions {
   readonly all?: boolean;
+}
+
+/**
+ * The `Headers` of a Node response from its flat `[name, value, ...]` list. A header the Fetch API refuses is dropped, and
+ * the answer is judged on the ones it keeps; the first refusal is handed to `report`.
+ *
+ * @internal
+ */
+export function headersFromRaw(
+  raw: readonly string[],
+  report: ((error: unknown) => void) | undefined,
+): Headers {
+  const headers = new Headers();
+  let reported = false;
+  for (let index = 0; index + 1 < raw.length; index += 2) {
+    const name = raw[index];
+    const value = raw[index + 1];
+    if (name === undefined || value === undefined) continue;
+    try {
+      headers.append(name, value);
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      if (!reported) report?.(error);
+      reported = true;
+    }
+  }
+  return headers;
 }
 
 /**
@@ -147,18 +179,7 @@ export function safeImageFetch(options: SafeImageFetchOptions = {}): typeof fetc
           // The signal keeps covering the body (the route's timeout ends a stalled download); it is released when the
           // response is over.
           res.once("close", () => signal?.removeEventListener("abort", onAbort));
-          const headers = new Headers();
-          for (let index = 0; index + 1 < res.rawHeaders.length; index += 2) {
-            const name = res.rawHeaders[index];
-            const value = res.rawHeaders[index + 1];
-            if (name === undefined || value === undefined) continue;
-            try {
-              headers.append(name, value);
-            } catch (error) {
-              // A header the Fetch API refuses is dropped; the answer is judged on the ones it keeps.
-              if (!(error instanceof TypeError)) throw error;
-            }
-          }
+          const headers = headersFromRaw(res.rawHeaders, options.report);
           const status = res.statusCode ?? 502;
           if (NO_BODY.has(status)) {
             res.resume();

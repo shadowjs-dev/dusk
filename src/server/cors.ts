@@ -51,24 +51,36 @@ export function resolveCors(options: CorsOptions | undefined): ResolvedCors | un
   for (const origin of options.origins) {
     if (!URL.canParse(origin) || new URL(origin).origin !== origin) {
       throw new TypeError(
-        `security.cors.origins: ${JSON.stringify(origin)} must be an origin such as https://app.example (no * and no path).`,
+        __DEV__
+          ? `security.cors.origins: ${JSON.stringify(origin)} must be an origin such as https://app.example (no * and no path).`
+          : "DUSK_CORS_4",
       );
     }
     origins.add(origin);
   }
   const methods = (options.methods ?? DEFAULT_METHODS).map((method) => {
     if (!TOKEN.test(method))
-      throw new TypeError(`security.cors.methods: ${JSON.stringify(method)} is not a method.`);
+      throw new TypeError(
+        __DEV__
+          ? `security.cors.methods: ${JSON.stringify(method)} is not a method.`
+          : "DUSK_CORS_3",
+      );
     return method.toUpperCase();
   });
   const headers = (options.headers ?? []).map((name) => {
     if (!TOKEN.test(name))
-      throw new TypeError(`security.cors.headers: ${JSON.stringify(name)} is not a header name.`);
+      throw new TypeError(
+        __DEV__
+          ? `security.cors.headers: ${JSON.stringify(name)} is not a header name.`
+          : "DUSK_CORS_1",
+      );
     return name;
   });
   const maxAge = options.maxAgeSeconds ?? 600;
   if (!Number.isInteger(maxAge) || maxAge < 0)
-    throw new TypeError("security.cors.maxAgeSeconds must be an integer, 0 or more.");
+    throw new TypeError(
+      __DEV__ ? "security.cors.maxAgeSeconds must be an integer, 0 or more." : "DUSK_CORS_2",
+    );
   return {
     origins,
     methods: methods.join(", "),

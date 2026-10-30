@@ -1,6 +1,6 @@
 {
   "name": "@shadow-js/dusk",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "A full-stack framework with file routes, loaders, server functions and secure request handling",
   "license": "MIT",
   "type": "module",
@@ -218,17 +218,17 @@
     "check": "npm run lint && npm run typecheck && npm run build && npm test && npm run test:perf && npm run test:gc"
   },
   "dependencies": {
-    "@shadow-js/query": "1.0.3",
-    "@shadow-js/vite": "1.0.3",
+    "@shadow-js/query": "1.0.4",
+    "@shadow-js/vite": "1.0.4",
     "acorn": "8.19.0",
     "magic-string": "^1.4.3"
   },
   "peerDependencies": {
     "@resvg/resvg-wasm": "^2.6.2",
-    "@shadow-js/core": "^1.0.3",
-    "@shadow-js/i18n": "^1.0.3",
-    "@shadow-js/router": "^1.0.3",
-    "@shadow-js/web": "^1.0.3",
+    "@shadow-js/core": "^1.0.4",
+    "@shadow-js/i18n": "^1.0.4",
+    "@shadow-js/router": "^1.0.4",
+    "@shadow-js/web": "^1.0.4",
     "satori": "^0.43.0",
     "sharp": "^0.35.5",
     "subset-font": "^2.9.0",
@@ -257,11 +257,11 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@resvg/resvg-wasm": "2.6.2",
-    "@shadow-js/compiler": "^1.0.3",
-    "@shadow-js/core": "^1.0.3",
-    "@shadow-js/i18n": "^1.0.3",
-    "@shadow-js/router": "^1.0.3",
-    "@shadow-js/web": "^1.0.3",
+    "@shadow-js/compiler": "^1.0.4",
+    "@shadow-js/core": "^1.0.4",
+    "@shadow-js/i18n": "^1.0.4",
+    "@shadow-js/router": "^1.0.4",
+    "@shadow-js/web": "^1.0.4",
     "@types/node": "^24.0.0",
     "esbuild": "0.27.0",
     "fast-check": "^4.10.2",

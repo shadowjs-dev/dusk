@@ -640,7 +640,8 @@ function mountOf(base: string): string {
  * `vite dev`, where the optimizer endpoint serves every image.
  *
  * Add it next to `dusk()` in `vite.config.ts`. An image that is imported from the source (and so hashed by the bundler) is
- * not prepared: it is served by the optimizer like any other image.
+ * prepared too, from the bytes the bundle holds; its variants go under the build's assets folder. Only a raster image
+ * is prepared, and anything left out is served by the optimizer like any other image.
  *
  * @param options See {@link ImageVariantsOptions}.
  * @returns A Vite plugin.

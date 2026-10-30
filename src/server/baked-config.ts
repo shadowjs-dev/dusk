@@ -84,6 +84,11 @@ export interface BakedServerConfig {
  *
  * @param baked The server configuration, or `undefined` for a project without `dusk.config.ts`.
  * @returns The options to pass to `createHandler`.
+ * @example
+ * import { createHandler, serverOptionsFromConfig } from "@shadow-js/dusk/server";
+ *
+ * // `baked` is the server part of dusk.config.ts that the build wrote into the server bundle.
+ * const handler = createHandler({ manifest, features, ...serverOptionsFromConfig(baked) });
  * @since 1.0.0
  */
 export function serverOptionsFromConfig(

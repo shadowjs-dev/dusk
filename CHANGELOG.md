@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4
+
+### Fixed
+
+- `useServiceWorkerUpdate().update()` now reloads the page onto the new version in a tab that was already open when the first service worker installed. Before, the old worker turning redundant ended the update just before the page took the new controller, so the new worker activated but the page stayed on the old version. Only the worker being applied going redundant ends an update now.
+- Smaller bundles with the same behavior.
+
 ## 1.0.3
 
 ### Fixed

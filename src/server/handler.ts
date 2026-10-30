@@ -457,7 +457,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       .then(() => {
         observing = undefined;
       });
-    if (wanted) observing = loading;
+    if (!__DEV__ || wanted) observing = loading;
   }
 
   // Environment: validated now when a source exists, otherwise on the first request (Workers).
@@ -561,8 +561,9 @@ export function createHandler(options: HandlerOptions): DuskHandler {
           : "content-security-policy";
       if (!headers.has(name)) headers.set(name, buildCsp(config.csp, event.nonce));
     }
-    // Header rules (`headers` in the config and the `headers` of route rules) match the path asked for. A header
-    // the handler already set wins over them; the framework's secure defaults come after them.
+    // Header rules (`headers` in the config and the `headers` of route rules) match the path asked for. They run after
+    // the secure headers and the CSP above, and only fill a name that is still absent (a header the handler or those
+    // defaults already set wins); a config rule with `override: true` replaces it.
     const asked = event.sourcePath;
     const routeRule =
       asked !== undefined && routingModule !== undefined
@@ -613,9 +614,9 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     need: (name, reason) => {
       throw missingFeature(name, reason);
     },
-    finalize: (event, response) => finalize(event, response),
-    failureResponse: (event, thrown) => failureResponse(event, thrown),
-    envFor: (platform) => envFor(platform),
+    finalize,
+    failureResponse,
+    envFor,
   };
 
   // The features, in their fixed order. Each fills its capability; none runs for a feature not listed.
@@ -640,7 +641,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     caseSensitive: config.manifest.caseSensitive === true,
   });
   /** The app path of a request path (without the base), or undefined when it is outside the base. */
-  const stripBase = (pathname: string): string | undefined => baseMatcher.stripBase(pathname);
+  const stripBase = baseMatcher.stripBase;
   const matchesPage = (event: EventState): boolean =>
     (capabilities.pages?.match(event.url.pathname, visibilityOf(event)).length ?? 0) > 0;
 
@@ -812,7 +813,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
         );
       }
     }
-    if (resolution.kind === "api" && watchLargeBody !== undefined) {
+    if (watchLargeBody !== undefined && resolution.kind === "api") {
       watchLargeBody(
         event.request,
         `${event.method} ${resolution.hit.id}`,
@@ -881,7 +882,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
    */
   const rewriteTo = async (event: EventState, moved: RewriteInstruction): Promise<Response> =>
     (await import("./middleware-rewrite")).rewriteTarget(event, moved, {
-      move: (event, hit) => rewriteEvent(event, hit),
+      move: rewriteEvent,
       answer: async (event) => answer(event, await resolve(event, false)),
     });
 
@@ -909,7 +910,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       if (typeof checked !== "string") return failureResponse(event, checked);
       return redirectResponse(checked, hit.status);
     },
-    rewrite: (event, hit) => rewriteEvent(event, hit),
+    rewrite: rewriteEvent,
   };
   // No rule declared: nothing redirects or rewrites (see `declaresRouting`), so the routing module is not needed.
   const routeEarly = (event: EventState): Response | undefined =>
@@ -919,7 +920,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
   const late: Routing.LateHost<Resolution> = {
     routing,
     stripBase,
-    rewrite: (event, hit) => rewriteEvent(event, hit),
+    rewrite: rewriteEvent,
     resolveAgain: (event) => resolve(event, false),
     matchesPage,
   };
@@ -1001,6 +1002,35 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       : { kind: "api", id: hit.id, params: hit.params };
   };
 
+  /** The state of one request; `bounded` is `request` as the body limit wraps it, and the address reads the original headers. */
+  const newEvent = (
+    request: Request,
+    bounded: Request,
+    url: URL,
+    signal: AbortSignal,
+    platform: unknown,
+    bodyCap: BodyCap,
+  ): EventState =>
+    new EventState({
+      request: bounded,
+      url,
+      signal,
+      id: crypto.randomUUID(),
+      nonce: config.nonce ? randomNonce() : undefined,
+      signer: config.signer,
+      // Browsers accept Secure cookies from localhost over http; in development that is the default.
+      secureCookies: !(config.dev && url.protocol === "http:" && isLoopback(url.hostname)),
+      env: EMPTY_ENV,
+      platform,
+      clientAddress: resolveClientAddress(peerOf(platform), request.headers, config.trustProxy),
+      dev: config.dev,
+      base: config.base,
+      trailingSlash: config.trailingSlash,
+      geo: hostGeoOf(platform),
+      lang: config.document.lang,
+      bodyCap,
+    });
+
   const handleRequest = async (
     request: Request,
     platform: unknown,
@@ -1054,25 +1084,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       dev: config.dev,
     };
     const bounded = rejected === undefined ? boundRequest(request, bodyCap, signal) : request;
-    const event = new EventState({
-      request: bounded,
-      url,
-      signal,
-      id: crypto.randomUUID(),
-      nonce: config.nonce ? randomNonce() : undefined,
-      signer: config.signer,
-      // Browsers accept Secure cookies from localhost over http; in development that is the default.
-      secureCookies: !(config.dev && url.protocol === "http:" && isLoopback(url.hostname)),
-      env: EMPTY_ENV,
-      platform,
-      clientAddress: resolveClientAddress(peerOf(platform), request.headers, config.trustProxy),
-      dev: config.dev,
-      base: config.base,
-      trailingSlash: config.trailingSlash,
-      geo: hostGeoOf(platform),
-      lang: config.document.lang,
-      bodyCap,
-    });
+    const event = newEvent(request, bounded, url, signal, platform, bodyCap);
 
     observer?.begin(event, span);
     // Revalidation (revalidatePath, revalidateTag) called in this request reaches the cache of this handler.
@@ -1142,23 +1154,10 @@ export function createHandler(options: HandlerOptions): DuskHandler {
   const gateAsset = async (request: Request, platform: unknown): Promise<AssetDecision> => {
     const url = new URL(request.url);
     url.hash = "";
-    const event = new EventState({
-      request,
-      url,
-      signal: request.signal,
-      id: crypto.randomUUID(),
-      nonce: config.nonce ? randomNonce() : undefined,
-      signer: config.signer,
-      secureCookies: !(config.dev && url.protocol === "http:" && isLoopback(url.hostname)),
-      env: EMPTY_ENV,
-      platform,
-      clientAddress: resolveClientAddress(peerOf(platform), request.headers, config.trustProxy),
+    const event = newEvent(request, request, url, request.signal, platform, {
+      limit: config.limits.maxBodyBytes,
+      form: config.limits.form,
       dev: config.dev,
-      base: config.base,
-      trailingSlash: config.trailingSlash,
-      geo: hostGeoOf(platform),
-      lang: config.document.lang,
-      bodyCap: { limit: config.limits.maxBodyBytes, form: config.limits.form, dev: config.dev },
     });
     event.route = { kind: "none", id: undefined, params: NO_PARAMS };
     event.sourcePath = stripBase(url.pathname);

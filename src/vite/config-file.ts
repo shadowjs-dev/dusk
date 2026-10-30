@@ -145,7 +145,7 @@ export interface DuskImageConfig {
   readonly sizes?: readonly number[];
   /** The formats the optimizer may produce. `original` is the source's own. Default: all of them. */
   readonly formats?: readonly ("original" | "webp" | "avif" | "jpeg" | "png")[];
-  /** The qualities the optimizer may produce (1 to 100). Default: any. */
+  /** The qualities the optimizer serves (1 to 100). Default `[75]`, the `<Image>` default; a request for another quality is a 400. */
   readonly qualities?: readonly number[];
 }
 

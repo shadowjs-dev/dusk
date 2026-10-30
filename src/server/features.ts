@@ -53,8 +53,8 @@ export const FEATURE_ORDER: readonly FeatureName[] = [
 /** The factory of each feature and the subpath it is imported from, named in refusals. */
 export const FEATURE_FACTORY: Readonly<
   Record<FeatureName, { readonly call: string; readonly from: string }>
-> = Object.fromEntries(
-  FEATURE_ORDER.map((name) => [
+> = /* @__PURE__ */ Object.fromEntries(
+  /* @__PURE__ */ FEATURE_ORDER.map((name) => [
     name,
     {
       call: `${name}()`,

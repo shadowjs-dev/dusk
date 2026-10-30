@@ -377,8 +377,12 @@ export type Next = () => Promise<Response>;
  * middleware arrives as the response the client would get (a 500 with the reason phrase, the
  * `HttpError`'s status and headers, the 3xx). Headers set after `await next()` are therefore on
  * error responses too. To let a failure take another shape, return a different response or throw
- * your own error (an `HttpError` is mapped like any other). Requests the guards or CSRF check
- * reject never reach middleware.
+ * your own error (an `HttpError` is mapped like any other).
+ *
+ * Some requests are answered before middleware runs and never reach it: one the request-line guards refuse (URL
+ * length, method, Host, framing), a redirect of the config or of a route rule, a CORS preflight, a declared body
+ * length over the limit, and a request the CSRF check rejects. Other limits apply while middleware runs: the body-size
+ * limit counts the bytes actually read, and the request timeout can end the request while `next()` is pending.
  *
  * @example
  * const timing: Middleware = async (event, next) => {

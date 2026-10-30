@@ -45,7 +45,8 @@ const APPLY_TIMEOUT_MS = 10_000;
 interface UpdateState {
   tracked: ServiceWorkerRegistration | undefined;
   waiting: boolean;
-  applying: boolean;
+  /** The waiting worker `update()` asked to take over; `undefined` when no `update()` is in flight. */
+  applying: ServiceWorker | undefined;
   readonly listeners: Set<() => void>;
   readonly followed: WeakSet<ServiceWorkerRegistration>;
   /** Drops the `controllerchange` listener and the timeout of an `update()` that is in flight. */
@@ -65,7 +66,7 @@ function stateOf(container: ServiceWorkerContainer): UpdateState {
     state = {
       tracked: undefined,
       waiting: false,
-      applying: false,
+      applying: undefined,
       listeners: new Set(),
       followed: new WeakSet(),
       cancelApply: undefined,
@@ -85,7 +86,7 @@ function publish(state: UpdateState, next: boolean): void {
 function resetApplying(state: UpdateState): void {
   state.cancelApply?.();
   state.cancelApply = undefined;
-  state.applying = false;
+  state.applying = undefined;
 }
 
 function subscribe(notify: () => void): () => void {
@@ -105,10 +106,17 @@ function track(container: ServiceWorkerContainer, registration: ServiceWorkerReg
   state.tracked = registration;
   const sync = (event?: Event): void => {
     const waiting = registration.waiting !== null;
-    // A worker that was replaced or discarded (`redundant`) can no longer be applied: let the page try again. One that
-    // leaves `waiting` by activating is the update going through, and its `controllerchange` (the reload) comes next.
+    // The worker being applied was replaced or discarded (`redundant`): it can no longer take over, let the page try
+    // again. One that leaves `waiting` by activating is the update going through, and its `controllerchange` (the
+    // reload) comes next. Any other worker going redundant (the old one that the new worker replaces on activation,
+    // right before that `controllerchange`) is not the update failing, and must keep the listener.
     const from = event?.target;
-    if (from !== null && from !== undefined && Reflect.get(from, "state") === "redundant")
+    if (
+      from !== null &&
+      from !== undefined &&
+      from === state.applying &&
+      Reflect.get(from, "state") === "redundant"
+    )
       resetApplying(state);
     publish(state, waiting);
   };
@@ -215,8 +223,8 @@ function applyUpdate(): void {
   if (container === undefined) return;
   const state = stateOf(container);
   const worker = state.tracked?.waiting;
-  if (worker === null || worker === undefined || state.applying) return;
-  state.applying = true;
+  if (worker === null || worker === undefined || state.applying !== undefined) return;
+  state.applying = worker;
   // The page reloads once, when the new worker controls it, so the markup and the cached assets are one version.
   const onChange = (): void => {
     resetApplying(state);

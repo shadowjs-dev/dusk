@@ -64,7 +64,8 @@ export interface ImageComponentProps {
   readonly unoptimized?: boolean;
   /**
    * Fill the nearest positioned parent (`position: relative` on it). The image is absolutely placed and covers the
-   * box; `width` and `height` still give the aspect ratio of the file.
+   * box (`object-fit: cover`). The `<img>` gets no `width` or `height` attribute, so the parent's box sets the size
+   * and the aspect ratio of the file is not reserved; `width` and `height` only pick the candidate widths.
    */
   readonly fill?: boolean;
   /** `blur`: a tiny image shown until the real one loads (`blurDataURL`). `color`: a background color. Default: none. */

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
 /**
- * Stable id of a server function: the first 128 bits of
- * `sha256(NFC(relative path) + "#" + export name)` in base64url (22 characters).
+ * Stable id of a server function: the first 22 base64url characters (132 bits) of
+ * `sha256(NFC(relative path) + "#" + export name)`.
  *
  * The path is relative to the project root with `/` separators, so the id is the same on every
  * machine, in dev and in build, and a rename of the file or the export changes it. It never

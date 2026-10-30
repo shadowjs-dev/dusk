@@ -301,7 +301,12 @@ function plain<T>(entries: readonly (readonly [string, T])[]): Record<string, T>
   return out;
 }
 
-/** Reads the lockfile; a missing one is an empty lock. A file that is not a lock is an error that names it. */
+/**
+ * Reads the lockfile; a missing one is an empty lock. A file that is not a lock is an error that names it.
+ * Not a public symbol: only the `defineFonts` build step reads the lock, and `@shadow-js/dusk/vite`
+ * re-exports just the types of this module.
+ * @internal
+ */
 export function readLock(file: string): FontLock {
   if (!existsSync(file)) return { version: LOCK_VERSION, fonts: plain([]) };
   const bad = (why: string): Error =>

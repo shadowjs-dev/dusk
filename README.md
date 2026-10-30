@@ -23,9 +23,7 @@ npm install -D vite typescript @types/node
 ```
 
 Node 22.12 or newer. `@shadow-js/dusk` depends on `@shadow-js/vite`; `core`, `web` and `router` are peer
-dependencies and Vite is an optional peer (`^8.0.0`, needed for development and builds). ShadowJS 1.0.0 is not
-on npm yet. Until it is published, install the packages from a checkout of this repository. `npm run smoke:dusk`
-in the repository packs the packages, creates an app, builds it, starts the production server and requests it.
+dependencies and Vite is an optional peer (`^7.0.0 || ^8.0.0`, needed for development and builds).
 
 ## Quick start
 
@@ -107,7 +105,7 @@ The package provides the `dusk` command:
 
 - `dusk dev [--port <n>] [--host [<host>]] [--strictPort] [--open] [--verbose]` runs the development server on port 3000 with the app's `vite.config.*`, with a banner and one line per page or API request.
 - `dusk build` writes the production output and prints a summary: the route table with each page's first-load JavaScript, and the budget warnings of `build.budgets`.
-- `dusk start [--port <n>] [--host [<host>]] [--workers <n|auto>] [--log]` (alias `dusk preview`) runs the production build with the Node adapter. Run `dusk build` first, and add `dusk({ adapter: node() })` to `vite.config.ts`. `--workers` (or `DUSK_WORKERS`) runs that many server processes that share the port; see "Using every core" below.
+- `dusk start [--port <n>] [--host [<host>]] [--workers <n|auto>] [--dir <folder>] [--log]` (alias `dusk preview`) runs the production build with the Node adapter. Run `dusk build` first, and add `dusk({ adapter: node() })` to `vite.config.ts`. It serves the folder the last build recorded (`dusk({ outDir })`, default `dist`); `--dir` names another. `--workers` (or `DUSK_WORKERS`) runs that many server processes that share the port; see "Using every core" below.
 - `dusk completion bash|zsh|fish` prints a shell completion script for the commands and flags (load it with `source <(dusk completion bash)`, `dusk completion fish | source`, or save the zsh script as `_dusk` on `$fpath`).
 - `dusk doctor` checks the project (Node version, config, routes, env files, adapter, lockfile, duplicate packages) and exits 1 when a check fails.
 - `dusk --help` and `dusk --version` print the usage and the version.
@@ -131,7 +129,7 @@ With `--json`, stdout carries only JSON; the words (logs, warnings, the stack of
 
 | Command | `data` | `warnings` |
 | --- | --- | --- |
-| `dusk build` | the build summary: `version`, `steps`, `prerendered`, `secretScan`, `adapter`, `routes`, `shared`, `ms` | one `DUSK_BUDGET` per budget warning |
+| `dusk build` | the build summary: `version`, `outDir`, `steps`, `prerendered`, `secretScan`, `adapter`, `adapterLog`, `routes`, `shared`, `ms` | one `DUSK_BUDGET` per budget warning |
 | `dusk doctor` | `checks` (`id`, `status`, `message`, `fix`); exit 1 and `DUSK_DOCTOR_FAILED` when one fails | one `DUSK_DOCTOR_<ID>` per `warn` check |
 | `dusk completion <shell>` | `shell`, `script` | none |
 | `dusk --help`, `dusk <command> --help`, `dusk --version` | `usage`, `version` | none |
@@ -156,7 +154,7 @@ dusk doctor --json | jq -r '.data.checks[] | select(.status != "ok") | "\(.id): 
 
 ## API
 
-Eight entry points. The reference lists every export with its signature; the guides explain how they fit.
+These entry points exist. The reference lists every export with its signature; the guides explain how they fit.
 
 | Entry | Runs in | Contents |
 | --- | --- | --- |
@@ -169,6 +167,8 @@ Eight entry points. The reference lists every export with its signature; the gui
 | `@shadow-js/dusk/auth` | server | `createOidcClient` (OAuth 2.1 / OpenID Connect authorization code flow with PKCE: discovery, ID token checks with WebCrypto, refresh, userinfo, RP-initiated logout), provider presets (`google`, `microsoft`, `auth0`, `okta`, `keycloak`, `github`, `discord`), `requireUser` guard, `verifyJwt`, `createJwksCache`, `OidcError` |
 | `@shadow-js/dusk/stores/redis` | server | `redisStore` (the page cache over any Redis client, no Redis package needed), `RedisClient` |
 | `@shadow-js/dusk/stores/contract` | tests | `runStoreContract`, `STORE_CONTRACT` (the scenarios every page cache store passes) |
+| `@shadow-js/dusk/components` | server and browser | `Image`, `Script`, `Island` (the components over `imageProps`, `scriptTag` and `islandAttributes`) |
+| `@shadow-js/dusk/og` | server | `ImageResponse`, `h` (images drawn from an element tree; `satori` and `@resvg/resvg-wasm` are optional peers) |
 | `@shadow-js/dusk/vite` | build time | `dusk` (the Vite plugin set), `transformServerFns`, `importProtection`, `fnId`, `defineFonts` (with per-route preloads and a size report), `pwa` (manifest, offline page and a generated service worker), `imageVariants` (AVIF and WebP files made at build time for `<Image>`) |
 | `@shadow-js/dusk/features/pwa` | browser | `registerServiceWorker`, `useServiceWorkerUpdate`, `unregisterServiceWorker` (the page side of `pwa()`; opt-in) |
 | `@shadow-js/dusk/bun` | Bun | `bun()` adapter, `serve` (`Bun.serve`, static files, gzip, graceful stop) |
@@ -178,8 +178,8 @@ Eight entry points. The reference lists every export with its signature; the gui
 | `@shadow-js/dusk/netlify` | Netlify | `netlify()` adapter (functions or edge functions, `_headers`, `_redirects`) |
 | `@shadow-js/dusk/tarout` | Tarout | `tarout()` adapter (the Node layout with the `start` script Tarout runs) |
 
-The adapters are passed to `dusk({ adapter })`; see the deployment guide, "Platforms".
-| `@shadow-js/router/vite` | build time | The file-route scanner and tree generator that `dusk` uses |
+The adapters are passed to `dusk({ adapter })`; see the deployment guide, "Platforms". The file-route scanner and tree
+generator that `dusk` uses is `@shadow-js/router/vite`.
 
 WebSocket routes run on Node, Bun, Deno and Cloudflare Workers through the same `streams()` guards,
 message limits and route callbacks. Bun exposes control frames to Dusk's ping/pong and rate checks.
@@ -356,13 +356,14 @@ A production build keeps a short code instead of the development explanation, so
 
 ## Dependencies
 
-- Runtime `@shadow-js/query` `1.0.0`: hashes data-cache keys (`src/server/data-cache.ts`).
-- Runtime `@shadow-js/vite` `1.0.0`: the Vite plugin the framework builds on (`src/vite/index.ts`).
+- Runtime `@shadow-js/query` `1.0.4`: hashes data-cache keys (`src/server/data-cache.ts`).
+- Runtime `@shadow-js/vite` `1.0.4`: the Vite plugin the framework builds on (`src/vite/index.ts`).
 - Runtime `acorn` `8.19.0`: parses modules for build checks (`src/adapter/checks.ts`).
 - Runtime `magic-string` `^1.4.3`: edits code in the Vite plugin and server-function transform.
-- Peers: `@shadow-js/core`, `@shadow-js/router`, and `@shadow-js/web` `^1.0.0`: the runtime, routing, and rendering the app uses.
-- Optional peers: `@shadow-js/i18n` `^1.0.0` for locale routing (`src/i18n`) and `vite` `^8.0.0` for the dev server and build.
-- Optional peers: `satori` `^0.43.0`, `@resvg/resvg-wasm` `^2.6.2`, `sharp` `^0.35.5`: renderers for Open Graph images (`src/og`).
+- Peers: `@shadow-js/core`, `@shadow-js/router`, and `@shadow-js/web` `^1.0.3`: the runtime, routing, and rendering the app uses.
+- Optional peers: `@shadow-js/i18n` `^1.0.3` for locale routing (`src/i18n`) and `vite` `^7.0.0 || ^8.0.0` for the dev server and build.
+- Optional peers: `satori` `^0.43.0` and `@resvg/resvg-wasm` `^2.6.2`: renderers for Open Graph images (`src/og`).
+- Optional peers: `sharp` `^0.35.5`: the image optimizer's `sharpProcessor` and the build-time `imageVariants()`. `subset-font` `^2.9.0`: build-time font subsetting.
 
 ## Types
 

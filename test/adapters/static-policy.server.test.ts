@@ -241,3 +241,20 @@ describe("the file owns its representation", () => {
     expect(headerOf(page, "cache-control")).toBe("public, max-age=60");
   });
 });
+
+describe("the page key does not tell spellings of one file apart", () => {
+  it("[DUSK-AUD-05] repeated and trailing slashes around the file forms of a page give its key", () => {
+    for (const path of [
+      "//about",
+      "/about//",
+      "/about/index.html/",
+      "//about/index.html",
+      "/about.html/",
+    ]) {
+      expect(pageKeyOf(path), path).toBe("/about");
+    }
+    expect(pageKeyOf("//")).toBe("/");
+    expect(pageKeyOf("/index.html/")).toBe("/");
+    expect(pageKeyOf("//index.html")).toBe("/");
+  });
+});

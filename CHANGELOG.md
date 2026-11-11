@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+### Fixed
+
+- A prerendered page that the app's rules send through the handler is no longer served from its file under `//page`, `/page/index.html/` or a doubled slash, on the Node, Bun, Deno, Cloudflare, Vercel and Netlify layers.
+- `rewrite()` refuses a destination whose normalized path starts with `//` (it named another origin).
+- The Node adapter answers `TRACE`, `TRACK` and `CONNECT` with 501 instead of a 500 and a logged failure.
+
 ## 1.0.4
 
 ### Fixed

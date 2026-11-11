@@ -64,17 +64,43 @@ export function staticPaths(context: {
  * The forced rewrites that send the pages the app's rules apply to (`mode: "handler"`) to the function. A page is
  * reachable as `/admin` and as its own files (`/admin/index.html`, `/admin.html`; the root has `/index.html`): all of
  * them go to the function, or the file would be served without the app's middleware.
+ *
+ * The Node, Bun and Cloudflare layers read a doubled slash and a trailing slash as the same file, so a rule is written
+ * for those spellings too. `_redirects` has no pattern for "any number of slashes" (a splat only ends a path, a
+ * placeholder is one segment), so the spellings are listed: the leading slash doubled (`//admin`), every separator
+ * doubled (`//blog//post`), and a slash after the file forms (`/admin/index.html/`). Netlify's CDN already matches a rule
+ * with or without a trailing slash; the explicit rules cost nothing if it does. A path of three or more segments whose
+ * doubling is only in the middle (`/a//b/c`) has no rule: it cannot be written without a pattern, and whether the CDN
+ * collapses repeated slashes before it matches is not documented. A deployment that needs it should put the page behind
+ * the function with a catch-all rule of its own.
  * @internal
  */
 export function pageRewritesOf(pages: readonly StaticPage[], functionPath: string): string[] {
-  return pages
-    .filter((page) => page.mode === "handler")
-    .flatMap((page) =>
-      (page.path === "/"
-        ? ["/", "/index.html"]
-        : [page.path, `${page.path}/index.html`, `${page.path}.html`]
-      ).map((from) => `${from} ${functionPath} 200!`),
-    );
+  const lines = new Set<string>();
+  for (const page of pages) {
+    if (page.mode !== "handler") continue;
+    const segments = page.path.split("/").filter((segment) => segment !== "");
+    const forms =
+      segments.length === 0
+        ? [
+            { path: "/", file: false },
+            { path: "/index.html", file: true },
+          ]
+        : [
+            { path: page.path, file: false },
+            { path: `${page.path}/index.html`, file: true },
+            { path: `${page.path}.html`, file: true },
+          ];
+    for (const form of forms) {
+      const doubled = form.path.replace(/\/+/g, "//");
+      const spellings = [form.path, `/${form.path}`, doubled];
+      for (const spelling of spellings) {
+        lines.add(spelling);
+        if (form.file) lines.add(`${spelling}/`);
+      }
+    }
+  }
+  return [...lines].map((from) => `${from} ${functionPath} 200!`);
 }
 
 /** True when a folder holds anything but prerendered HTML (a page folder stays with the function). */

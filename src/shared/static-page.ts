@@ -32,7 +32,11 @@ export interface StaticPage {
  * @since 1.0.0
  */
 export function pageKeyOf(pathname: string): string {
-  let path = pathname;
+  // Repeated slashes name the same file (`//about`, `/about//index.html`): the static layers look the file up by its
+  // segments, so the key must not tell those spellings apart, or a handler page would be read from its file.
+  let path = pathname.replace(/\/{2,}/g, "/");
+  // A trailing slash comes off first, so `/about/index.html/` is the page of `/about/index.html`.
+  while (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
   if (path.endsWith("/index.html")) path = path.slice(0, -"/index.html".length);
   else if (path.endsWith(".html")) path = path.slice(0, -".html".length);
   while (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);

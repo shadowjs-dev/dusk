@@ -17,6 +17,9 @@ export interface BridgeOptions {
 // A host name or address with an optional port: no path, user info, spaces or quotes.
 const HOST = /^(?:[A-Za-z0-9._~-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
 const BODYLESS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+// The Fetch `Request` constructor throws for these three methods. Node's parser accepts them, so without a check the
+// throw would escape the bridge as a 500 that is also reported as a server failure.
+const UNSUPPORTED_METHODS: ReadonlySet<string> = new Set(["TRACE", "TRACK", "CONNECT"]);
 
 /** Counts how often a header name occurs in the raw header list (names compare case-insensitively). */
 function occurrences(rawHeaders: readonly string[], name: string): number {
@@ -106,6 +109,9 @@ export function toWebRequest(
   const built = requestUrlOf(req, options);
   if ("rejection" in built) return built;
   const url = built.url;
+  // Not implemented, like the handler answers a method it does not know (501), and not a failure worth a log line.
+  if (UNSUPPORTED_METHODS.has((req.method ?? "GET").toUpperCase()))
+    return { rejection: { status: 501, message: "Not Implemented" } };
 
   const headers = new Headers();
   for (let index = 0; index < req.rawHeaders.length; index += 2) {

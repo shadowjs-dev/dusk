@@ -166,21 +166,37 @@ export function vercel(options: VercelAdapterOptions = {}): Adapter {
 }
 
 /**
- * A regular expression for a Vercel route `src` that matches one page path, with or without its trailing slash.
+ * The regular-expression source of a page path that reads a doubled slash like one (`/+` between segments and before the
+ * first), the way the Node, Bun and Cloudflare layers read the path. The root has no segment. Vercel anchors nothing: the
+ * `^` and `$` are written here.
+ * @internal
+ */
+function segmentsSource(path: string): string {
+  return path
+    .split("/")
+    .filter((segment) => segment !== "")
+    .map((segment) => `/+${escapeRegex(segment)}`)
+    .join("");
+}
+
+/**
+ * A regular expression for a Vercel route `src` that matches one page path, with or without trailing slashes, and with
+ * repeated slashes anywhere (`//posts`, `/blog//post`).
  * @internal
  */
 function pathSource(path: string): string {
-  if (path === "/") return "^/$";
-  return `^${escapeRegex(path)}/?$`;
+  const body = segmentsSource(path);
+  return body === "" ? "^/+$" : `^${body}/*$`;
 }
 
 /**
  * A regular expression for the URLs of a page's own file: `/admin/index.html` and `/admin.html` (the root has only
- * `/index.html`).
+ * `/index.html`), with repeated slashes anywhere and trailing slashes after the file name (`/admin/index.html/`).
  * @internal
  */
 function fileFormsSource(path: string): string {
-  return path === "/" ? "^/index\\.html$" : `^${escapeRegex(path)}(?:/index\\.html|\\.html)$`;
+  const body = segmentsSource(path);
+  return body === "" ? "^/+index\\.html/*$" : `^${body}(?:/+index\\.html|\\.html)/*$`;
 }
 
 /**

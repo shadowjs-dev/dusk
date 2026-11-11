@@ -19,6 +19,7 @@ import { checkOutDir, relativePath } from "../adapter/paths";
 import { type Adapter, NODE_LIKE_CAPABILITIES } from "../adapter/types";
 import type { FetchModule } from "../server/platform";
 import type { Handler } from "../server/types";
+import { pageKeyOf } from "../shared/static-page";
 
 /** Options of the {@link cloudflare} adapter. @since 1.0.0 */
 export interface CloudflareAdapterOptions {
@@ -253,7 +254,8 @@ export function workerSource(input: {
     "",
     "// Mirrors pageKeyOf (shared/static-page.ts): /about/, /about/index.html and /about.html are /about.",
     "function pageKeyOf(pathname) {",
-    "  let path = pathname;",
+    '  let path = pathname.replace(/\\/{2,}/g, "/");',
+    '  while (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);',
     '  if (path.endsWith("/index.html")) path = path.slice(0, -"/index.html".length);',
     '  else if (path.endsWith(".html")) path = path.slice(0, -".html".length);',
     '  while (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);',
@@ -305,11 +307,7 @@ export function workerSource(input: {
  * @internal
  */
 function pageKeyOfSource(path: string): string {
-  let text = path;
-  if (text.endsWith("/index.html")) text = text.slice(0, -"/index.html".length);
-  else if (text.endsWith(".html")) text = text.slice(0, -".html".length);
-  while (text.length > 1 && text.endsWith("/")) text = text.slice(0, -1);
-  return text === "" ? "/" : text;
+  return pageKeyOf(path);
 }
 
 /**

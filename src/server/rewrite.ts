@@ -65,6 +65,13 @@ export function rewrite(destination: string, options: RewriteOptions = {}): Resp
       `rewrite(${JSON.stringify(destination)}): the ${RESERVED} prefix is reserved.`,
     );
   }
+  // The URL parser removes dot segments, so `/.//host` has the path `//host`: as a URL against the app's origin it would
+  // name another host. The check above sees only the text written, this one the path the handler will use.
+  if (url.pathname.startsWith("//")) {
+    throw new TypeError(
+      `rewrite(${JSON.stringify(destination)}): the destination must be a path of this app.`,
+    );
+  }
   const marker = new Response(null, { status: 204 });
   instructions.set(marker, {
     path: url.pathname,

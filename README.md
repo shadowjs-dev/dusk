@@ -272,7 +272,7 @@ must observe the handler's `event.signal` to finish their own asynchronous clean
 
 ## Production error codes
 
-A production build keeps a short code instead of the development explanation, so message text never reaches user bundles. Search this table for the code. In the explanation, `…` stands for a value the development message names. A code followed by a word (`DUSK_HEADER_5 security.headers`) names the option, feature or member at fault.
+For the errors in the table below, a production build keeps a short code instead of the development explanation; other errors keep their message in every build. Search this table for the code. In the explanation, `…` stands for a value the development message names. A code followed by a word (`DUSK_HEADER_5 security.headers`) names the option, feature or member at fault.
 
 | Code | Development explanation |
 | --- | --- |
@@ -360,8 +360,8 @@ A production build keeps a short code instead of the development explanation, so
 - Runtime `@shadow-js/vite` `1.0.4`: the Vite plugin the framework builds on (`src/vite/index.ts`).
 - Runtime `acorn` `8.19.0`: parses modules for build checks (`src/adapter/checks.ts`).
 - Runtime `magic-string` `^1.4.3`: edits code in the Vite plugin and server-function transform.
-- Peers: `@shadow-js/core`, `@shadow-js/router`, and `@shadow-js/web` `^1.0.3`: the runtime, routing, and rendering the app uses.
-- Optional peers: `@shadow-js/i18n` `^1.0.3` for locale routing (`src/i18n`) and `vite` `^7.0.0 || ^8.0.0` for the dev server and build.
+- Peers: `@shadow-js/core`, `@shadow-js/router`, and `@shadow-js/web` `^1.0.5`: the runtime, routing, and rendering the app uses.
+- Optional peers: `@shadow-js/i18n` `^1.0.5` for locale routing (`src/i18n`) and `vite` `^7.0.0 || ^8.0.0` for the dev server and build.
 - Optional peers: `satori` `^0.43.0` and `@resvg/resvg-wasm` `^2.6.2`: renderers for Open Graph images (`src/og`).
 - Optional peers: `sharp` `^0.35.5`: the image optimizer's `sharpProcessor` and the build-time `imageVariants()`. `subset-font` `^2.9.0`: build-time font subsetting.
 

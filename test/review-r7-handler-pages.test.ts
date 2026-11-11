@@ -58,12 +58,17 @@ describe("a handler-mode page is not served from its file under any URL", () => 
       [page("/admin", "handler"), page("/", "handler"), page("/about", "static")],
       "/.netlify/functions/render",
     );
-    expect(lines).toEqual([
+    // The file forms, then the spellings of them the static layers read as the same file (doubled slashes, a slash after
+    // the file name); the full list is in audit-handler-page-routes.test.ts.
+    expect(lines.slice(0, 5)).toEqual([
       "/admin /.netlify/functions/render 200!",
+      "//admin /.netlify/functions/render 200!",
       "/admin/index.html /.netlify/functions/render 200!",
-      "/admin.html /.netlify/functions/render 200!",
-      "/ /.netlify/functions/render 200!",
-      "/index.html /.netlify/functions/render 200!",
+      "/admin/index.html/ /.netlify/functions/render 200!",
+      "//admin/index.html /.netlify/functions/render 200!",
     ]);
+    expect(lines).toContain("/index.html /.netlify/functions/render 200!");
+    expect(lines).toContain("/ /.netlify/functions/render 200!");
+    expect(lines.some((line) => line.startsWith("/about"))).toBe(false);
   });
 });

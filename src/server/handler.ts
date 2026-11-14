@@ -799,6 +799,8 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       }
     }
     const csrfApplies = resolution.kind !== "api" || resolution.hit.module.csrf !== false;
+    // A refusal that waits for the app-wide middleware (see below).
+    let refusal: HttpError | undefined;
     if (config.csrf.enabled && csrfApplies) {
       const decision = checkCsrf(event.request, {
         origin: event.url.origin,
@@ -806,11 +808,22 @@ export function createHandler(options: HandlerOptions): DuskHandler {
         allowMissingOrigin: config.csrf.allowMissingOrigin,
       });
       if (!decision.ok) {
-        throw new HttpError(
+        const refused = new HttpError(
           403,
           event.dev ? `CSRF check failed: ${decision.reason}` : "Forbidden",
           { expose: true },
         );
+        // A host listed in `security.csrf.rewriteHosts` may have its request rewritten to a route that decides about CSRF
+        // itself (an API route that sets `csrf = false`), and this check saw only the path asked for. For that host the
+        // middleware runs first, and the refusal stands for every answer except a rewrite, which is checked again against
+        // its target. Anywhere else, and for a request a rewrite already moved, the middleware never sees a request the
+        // check refuses: refuse now.
+        const waits =
+          !event.rewritten &&
+          config.middleware.length > 0 &&
+          config.csrf.rewriteHosts?.(event.url.host) === true;
+        if (!waits) throw refused;
+        refusal = refused;
       }
     }
     if (watchLargeBody !== undefined && resolution.kind === "api") {
@@ -823,6 +836,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     // A request a rewrite already moved skips the app-wide middleware: the rewrite answer is the middleware's
     // decision for this request, and running the chain again on the target could rewrite it forever.
     const endpoint = async (): Promise<Response> => {
+      if (refusal !== undefined) throw refusal;
       switch (resolution.kind) {
         case "rpc":
           return resolution.capability.handle(event, resolution.id);
@@ -867,13 +881,22 @@ export function createHandler(options: HandlerOptions): DuskHandler {
       }
     };
     const obs = event.obs;
-    const outcome = await runMiddleware(
-      event.rewritten ? [] : config.middleware,
-      event,
-      obs === undefined ? endpoint : () => obs.endpoint(resolution.kind, route.id, endpoint),
-    );
+    let outcome: Response;
+    try {
+      outcome = await runMiddleware(
+        event.rewritten ? [] : config.middleware,
+        event,
+        obs === undefined ? endpoint : () => obs.endpoint(resolution.kind, route.id, endpoint),
+      );
+    } catch (error) {
+      // The middleware's own failure does not replace the refusal it was run under.
+      throw refusal ?? error;
+    }
     const moved = rewriteOf(outcome);
-    return moved === undefined ? outcome : rewriteTo(event, moved);
+    if (moved !== undefined) return rewriteTo(event, moved);
+    // Whatever the middleware answered, a refused request gets the refusal.
+    if (refusal !== undefined) throw refusal;
+    return outcome;
   };
 
   /**
@@ -891,6 +914,7 @@ export function createHandler(options: HandlerOptions): DuskHandler {
     event: EventState,
     hit: { readonly path: string; readonly search: string },
   ): void => {
+    event.visiblePathname ??= event.url.pathname;
     event.url = new URL(`${config.base}${hit.path}${hit.search}`, event.url.origin);
     // The target of a rewrite may be a private route: a request the client sent cannot be (see `visibilityOf`).
     event.internalAccess = true;

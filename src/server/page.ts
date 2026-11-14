@@ -25,7 +25,7 @@ import { commitResponse, responseStatus } from "../shared/response";
 import { buildLinkHeader, buildPayload, buildShell, collectAssets } from "./document";
 import { sendEarlyHints } from "./early-hints";
 import { describeError, errorPageHtml, type NotFoundPage, redirectResponse } from "./errors";
-import { type EventState, visibilityOf } from "./event";
+import { type EventState, visibilityOf, visiblePathOf } from "./event";
 import { takeFlash } from "./flash";
 import { checkRedirectTarget } from "./redirect-target";
 import { openPageState, publicError } from "./route-wrap";
@@ -248,6 +248,21 @@ function composeBody(
   );
 }
 
+/**
+ * The `routePath` of the server router for a request a rewrite moved: the asked path (trailing slash aside) is matched as
+ * the rewrite's target, every other path as itself. `undefined` when nothing moved the request.
+ */
+function rewrittenRoutePath(
+  rt: PageRuntime,
+  event: EventState,
+  asked: string,
+): ((path: string) => string) | undefined {
+  if (event.visiblePathname === undefined) return undefined;
+  const from = withoutTrailingSlash(rt.pageMatcher.stripBase(asked) ?? asked);
+  const to = rt.pageMatcher.stripBase(event.url.pathname) ?? event.url.pathname;
+  return (path) => (withoutTrailingSlash(path) === from ? to : path);
+}
+
 /** How a page is rendered, from the `ssr` option of the matched routes. */
 type RenderMode = "full" | "data-only" | "shell";
 
@@ -336,10 +351,14 @@ export async function renderPage(rt: PageRuntime, event: EventState): Promise<Re
     if (caught.first === undefined && caught.shellOpen) caught.first = { error };
     if (describeError(error, config.dev).report) rt.report(error, "render", event);
   };
+  // The page's location is the address the client asked for; the routes are the ones the rewrite chose.
+  const asked = visiblePathOf(event);
+  const routePath = rewrittenRoutePath(rt, event, asked);
   const router = createRouter({
     routes: rt.pageRoutes,
     features: rt.routerFeatures,
-    history: createMemoryHistory({ initialEntries: [`${event.url.pathname}${event.url.search}`] }),
+    history: createMemoryHistory({ initialEntries: [`${asked}${event.url.search}`] }),
+    ...(routePath === undefined ? {} : { routePath }),
     base: config.base,
     trailingSlash: config.trailingSlash,
     caseSensitive: config.manifest.caseSensitive === true,
@@ -383,7 +402,7 @@ export async function renderPage(rt: PageRuntime, event: EventState): Promise<Re
 
     let status = 200;
     if (outcome.kind === "success") {
-      const requested = event.url.pathname;
+      const requested = asked;
       const canonical = outcome.location.pathname;
       if (
         requested !== canonical &&

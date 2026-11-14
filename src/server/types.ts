@@ -443,6 +443,19 @@ export interface CsrfOptions {
    * (command-line clients). Default `false`: such requests are rejected.
    */
   readonly allowMissingOrigin?: boolean;
+  /**
+   * Host names (the `allowedHosts` syntax, wildcards and ports included) whose requests may be rewritten by the app-wide
+   * middleware (`rewrite()`) to a route that decides about CSRF itself, such as an API route with `csrf = false`.
+   *
+   * The check normally runs before any middleware, against the path the client asked for. For a request to a listed host
+   * that the check would refuse, the middleware runs once first; if it rewrites, the target's own setting applies (the
+   * check runs again against it), and for any other outcome the refusal stands whatever the middleware answered. A host
+   * that is not listed keeps the rule that a request the check refuses never reaches the middleware. List only the hosts
+   * whose middleware does nothing but route (an API host that rewrites into a private folder).
+   *
+   * @since 1.0.6
+   */
+  readonly rewriteHosts?: readonly string[];
 }
 
 /** Options of the secure response headers. Each value can be replaced, or `false` to omit the header. @since 1.0.0 */

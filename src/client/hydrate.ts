@@ -82,6 +82,17 @@ export interface HydrateDuskOptions {
   /** Prefix of the hydration keys; equals the server's `renderId`. Default `"0"`. */
   readonly renderId?: string;
   /**
+   * Maps the visible path to the path of the route tree, for an app whose middleware rewrites requests into private
+   * routes (one app serving several hosts: `rewrite("/_hosts/dash/about")` for `dash.example.com/about`). It receives
+   * the path of the browser's location without the `base` and returns the route-tree path to match. Write one
+   * function, use it in the middleware's `rewrite()` and here, so the server and the browser choose the same routes;
+   * it runs on every match and must be pure. The location, links and history keep the visible path, and the
+   * navigation check (`POST /_dusk/nav`) is sent the mapped path too. Absent: the visible path is the route path.
+   *
+   * @since 1.0.6
+   */
+  readonly routePath?: (path: string) => string;
+  /**
    * More router options (context, trailing slash policy, pending delays), and the two that are features:
    * `cache` (the loader cache limits) and `viewTransitions` (`true` turns view transitions on).
    * The trailing slash policy inherits the server document unless overridden here.
@@ -187,6 +198,7 @@ export async function hydrateDusk(options: HydrateDuskOptions): Promise<DuskClie
       ? { trailingSlash: serverPolicy }
       : {}),
     ...routerOptions,
+    ...(options.routePath === undefined ? {} : { routePath: options.routePath }),
     features: duskFeatures({
       ...(cache === undefined ? {} : { cache }),
       ...(viewTransitions === undefined ? {} : { viewTransitions }),
@@ -196,6 +208,7 @@ export async function hydrateDusk(options: HydrateDuskOptions): Promise<DuskClie
     routes: gateServerNavigations(options.routes, {
       base: options.base ?? "",
       origin: win.location.origin,
+      ...(options.routePath === undefined ? {} : { routePath: options.routePath }),
       fetch: (input, init) => globalThis.fetch(input, init),
       leave: (href) => win.location.replace(href),
     }),

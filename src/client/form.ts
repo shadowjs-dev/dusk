@@ -163,24 +163,41 @@ function nameOf(path: readonly (string | number)[]): string {
     .join("");
 }
 
-/** Clears the problem marks of the form. @internal */
-function clearMarks(form: HTMLFormElement): void {
-  for (const element of Array.from(form.querySelectorAll('[aria-invalid="true"]'))) {
-    element.removeAttribute("aria-invalid");
+/** The fields a form marked, with the `aria-invalid` each had before (`null`: none). Kept by one `enhanceForm`. @internal */
+type Marks = Map<HTMLElement, string | null>;
+
+/**
+ * Clears the problem marks the form made: a field is put back as it was before the mark, and only while it still says
+ * `true`. An `aria-invalid` the application set or changed is the application's and stays. @internal
+ */
+function clearMarks(marks: Marks): void {
+  for (const [element, before] of marks) {
+    if (element.getAttribute("aria-invalid") !== "true") continue;
+    if (before === null) element.removeAttribute("aria-invalid");
+    else element.setAttribute("aria-invalid", before);
   }
+  marks.clear();
 }
 
 /**
  * Marks the fields that have a problem (`aria-invalid="true"`) and moves focus to the first of them, or
  * to the form's error summary (`[data-dusk-form-errors]`) when it has one. @internal
  */
-function markIssues(form: HTMLFormElement, issues: readonly WireIssue[], focus: boolean): void {
-  clearMarks(form);
+function markIssues(
+  form: HTMLFormElement,
+  marks: Marks,
+  issues: readonly WireIssue[],
+  focus: boolean,
+): void {
+  clearMarks(marks);
   let first: HTMLElement | undefined;
   for (const issue of issues) {
     const name = nameOf(issue.path);
     for (const element of Array.from(form.elements)) {
       if (element instanceof HTMLElement && element.getAttribute("name") === name) {
+        const before = element.getAttribute("aria-invalid");
+        // A field the application already marked stays the application's: the form clears only what it set.
+        if (before !== "true") marks.set(element, before);
         element.setAttribute("aria-invalid", "true");
         first ??= element;
       }
@@ -236,6 +253,7 @@ function queryOf(data: FormData): string {
 export function enhanceForm(form: HTMLFormElement, options: EnhanceOptions): () => void {
   if (options.reloadDocument === true) return () => undefined;
   const store = options.store ?? createSubmissionStore();
+  const marks: Marks = new Map();
   const method = options.method ?? (options.fn === undefined ? "get" : "post");
   let busy = false;
   const setBusy = (value: boolean): void => {
@@ -251,9 +269,9 @@ export function enhanceForm(form: HTMLFormElement, options: EnhanceOptions): () 
       const failed = sub.failed();
       if (failed) {
         const issues = issuesOf(result);
-        if (issues !== undefined) markIssues(form, issues, focus);
+        if (issues !== undefined) markIssues(form, marks, issues, focus);
       } else {
-        clearMarks(form);
+        clearMarks(marks);
         if (options.resetOnSuccess === true) form.reset();
       }
       options.onResult?.(result, form);
@@ -262,7 +280,7 @@ export function enhanceForm(form: HTMLFormElement, options: EnhanceOptions): () 
     if (sub.status() === "error") {
       const error = sub.error();
       const issues = issuesOf(error);
-      if (issues !== undefined) markIssues(form, issues, focus);
+      if (issues !== undefined) markIssues(form, marks, issues, focus);
       options.onError?.(error, form);
     }
   };

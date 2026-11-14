@@ -5,19 +5,26 @@ import type { Middleware, MiddlewareModule, RouteMiddlewareManifest } from "./ty
 const GATE_SEARCH_LIMIT = 2048;
 
 /**
- * The target of a gate request: its app path and its query string (`search`, `""` or starting with `?`).
- * The path is checked by {@link gatePathOf}; the search may not hold control characters, a fragment or a
+ * The target of a gate request: its app path, its query string (`search`, `""` or starting with `?`) and, when the
+ * browser maps the visible path to another route (`hydrateDusk({ routePath })`), the `route` whose chain is checked.
+ * The path and the route are checked by {@link gatePathOf}; the search may not hold control characters, a fragment or a
  * backslash, and is bounded.
  *
- * @param body The parsed JSON body (`{ path, search? }`).
- * @returns The path and the search.
+ * @param body The parsed JSON body (`{ path, search?, route? }`).
+ * @returns The path, the route (when given) and the search.
  * @throws HttpError 400 for anything else.
  * @internal
  */
-export function gateTargetOf(body: unknown): { readonly path: string; readonly search: string } {
+export function gateTargetOf(body: unknown): {
+  readonly path: string;
+  readonly search: string;
+  readonly route: string | undefined;
+} {
   const path = gatePathOf(body);
+  const asked = typeof body === "object" && body !== null ? Reflect.get(body, "route") : undefined;
+  const route = asked === undefined ? undefined : gatePathOf({ path: asked });
   const raw = typeof body === "object" && body !== null ? Reflect.get(body, "search") : undefined;
-  if (raw === undefined) return { path, search: "" };
+  if (raw === undefined) return { path, search: "", route };
   if (typeof raw !== "string" || raw.length > GATE_SEARCH_LIMIT)
     throw new HttpError(400, "Bad Request");
   if (raw !== "" && !raw.startsWith("?")) throw new HttpError(400, "Bad Request");
@@ -27,7 +34,7 @@ export function gateTargetOf(body: unknown): { readonly path: string; readonly s
       throw new HttpError(400, "Bad Request");
     }
   }
-  return { path, search: raw };
+  return { path, search: raw, route };
 }
 
 /**

@@ -49,6 +49,8 @@ export interface ResolvedConfig {
     readonly enabled: boolean;
     readonly allowMissingOrigin: boolean;
     readonly trusted: ReadonlySet<string>;
+    /** The hosts whose refused requests still run the middleware, so it can rewrite them (`CsrfOptions.rewriteHosts`). */
+    readonly rewriteHosts: ((host: string) => boolean) | undefined;
   };
   readonly signer: CookieSigner | undefined;
   readonly trustProxy: TrustProxyOptions | undefined;
@@ -301,6 +303,13 @@ export function resolveConfig(options: HandlerOptions): ResolvedConfig {
           ? false
           : csrfOptions.allowMissingOrigin === true,
       trusted: csrfTrusted,
+      rewriteHosts:
+        csrfOptions === false ||
+        csrfOptions === undefined ||
+        csrfOptions.rewriteHosts === undefined ||
+        csrfOptions.rewriteHosts.length === 0
+          ? undefined
+          : compileHostRules(csrfOptions.rewriteHosts),
     },
     signer:
       security.cookieSecrets === undefined || security.cookieSecrets.length === 0

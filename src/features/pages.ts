@@ -253,9 +253,10 @@ export function pages(options: PagesOptions = {}): DuskFeature {
         if (event.method !== "POST") {
           throw new HttpError(405, "Method Not Allowed", { headers: { allow: "POST" } });
         }
-        const { path, search } = gateTargetOf(await readJson(event.request));
+        const { path, search, route } = gateTargetOf(await readJson(event.request));
         // The gate checks the middleware of the target, private routes included: the browser may render them next.
-        const chain = pageMatcher.match(`${config.base}${path}`, "all");
+        // A browser that maps its address to another route (`routePath`) names that route; the chain runs for it.
+        const chain = pageMatcher.match(`${config.base}${route ?? path}`, "all");
         const middleware = await pageMiddlewareFor(config.manifest.middleware, chain);
         // The chain sees the TARGET as `event.url` (path and search) and `isNavigationCheck`, so a redirect
         // from it can carry `redirect_url` = the target, exactly as for a document request.

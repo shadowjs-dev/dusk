@@ -56,6 +56,12 @@ export class EventState implements RequestEvent {
    * then may the route answer be a private route (a `_`-prefixed path); a request from outside never is.
    */
   internalAccess = false;
+  /**
+   * The pathname the client asked for, set by the first rewrite that moves `url` (`undefined` before one). The page's
+   * location is this path: the browser's router sees the same one, and its routes are matched against `url` (see
+   * `visiblePathOf`).
+   */
+  visiblePathname: string | undefined = undefined;
   /** Set only while the navigation gate runs a target's chain (see `isNavigationCheck`). */
   #navigationCheck = false;
 
@@ -226,4 +232,17 @@ export function signerFor(secrets: readonly string[] | undefined): CookieSigner 
  */
 export function visibilityOf(event: Pick<EventState, "internalAccess">): RouteVisibility {
   return event.internalAccess ? "all" : "public";
+}
+
+/**
+ * The pathname of the page's location: the one the client asked for, which a rewrite (`rewrite()`, or a `rewrites` rule)
+ * does not change. `event.url` is the route that answers; the router's location, the canonical redirect and the
+ * metadata's page path use this one, so the server's page and the browser's page see the same address.
+ *
+ * @param event The request event.
+ * @returns The asked pathname (with the mount base), or the URL's own when nothing rewrote it.
+ * @internal
+ */
+export function visiblePathOf(event: Pick<EventState, "url" | "visiblePathname">): string {
+  return event.visiblePathname ?? event.url.pathname;
 }

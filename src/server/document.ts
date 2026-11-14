@@ -8,6 +8,8 @@ import type { DuskRuntimeManifest } from "./types";
 export const ROUTER_PAYLOAD_ID = "__shadow_router";
 
 const SAFE_URL = /^(?:\/(?!\/)|https?:\/\/)[^\s"'<>\\`]*$/;
+/** A `<meta>` tag with a `charset` attribute, whatever its position; quoted values are skipped, so `content="...charset=..."` is not one. */
+const DECLARES_CHARSET = /<meta\b(?:[^>"']|"[^"]*"|'[^']*')*?\scharset\s*=/i;
 const MAX_LINKS = 16;
 const MAX_LINK_HEADER = 4096;
 
@@ -214,8 +216,12 @@ export function buildShell(input: ShellInput): {
     .join("");
   const dir = input.dir === undefined ? "" : ` dir="${input.dir}"`;
   // The declaration is the first head element, so a copy served with no charset in its Content-Type still decodes
-  // the same way (a prerendered file on a static host). A head that already declares one keeps its own, once.
-  const charset = /<meta\s+charset=/i.test(input.headHtml) ? "" : '<meta charset="utf-8">';
+  // the same way (a prerendered file on a static host). A head that already declares one keeps its own, once: the
+  // head renderer marks its tags (`<meta data-shadow-head charset="utf-8">`), so the attribute can sit anywhere in the tag.
+  const charset =
+    DECLARES_CHARSET.test(input.headHtml) || DECLARES_CHARSET.test(input.extraHead)
+      ? ""
+      : '<meta charset="utf-8">';
   const trailingSlash =
     input.trailingSlash === undefined || input.trailingSlash === "never"
       ? ""

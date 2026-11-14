@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.6
+
+### Added
+
+- `hydrateDusk({ routePath })` gives the browser's router the mapping a middleware's `rewrite()` applies on the server (`dashboard.example.com/about` to `/_hosts/dashboard/about`), so one app can serve several hosts with clashing paths: the markup hydrates without a mismatch, and client navigation and the back button stay on the host. The server's page location is now the path the client asked for (`aria-current` of a link, the trailing-slash redirect and the metadata's `./` canonical no longer name the private route), `event.url` stays the rewrite's target, and the navigation check (`POST /_dusk/nav`) takes an optional `route` (the mapped path) next to `path` and runs the middleware of that route's chain.
+- `security.csrf.rewriteHosts` lists hosts whose requests may be rewritten before the CSRF refusal is final: for a request to such a host that the check would refuse, the app-wide middleware runs once, and if it rewrites, the check runs again against the target, so a target route with `csrf = false` is honored. Any other outcome keeps the refusal, and a host that is not listed keeps the rule that a refused request never reaches the middleware.
+
+### Fixed
+
+- `<Form>` removes only the `aria-invalid` it set itself. An `aria-invalid` the application sets on a field (a reactive binding of its own validation) is no longer removed after a submission that is not a `fail()` result, and a field the form marked goes back to the value it had before.
+- The document has one `<meta charset>`: a head that declares it with another attribute in the tag (`<meta data-shadow-head charset="utf-8">`) no longer gets the shell's declaration as well.
+
 ## 1.0.5
 
 ### Fixed

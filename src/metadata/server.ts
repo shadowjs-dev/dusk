@@ -1,6 +1,6 @@
 import type { RenderedMatch } from "@shadow-js/router";
 import { normalizeTags } from "@shadow-js/web/server";
-import { type EventState, visibilityOf } from "../server/event";
+import { type EventState, visibilityOf, visiblePathOf } from "../server/event";
 import type { PageRuntime } from "../server/runtime";
 import type { GlobalErrorModule } from "../shared/global-error";
 import { chainRoutesOf, type SpecExports, searchRecord, staticChainRouteOf } from "./feature";
@@ -66,7 +66,7 @@ function headOf(chain: ResolvedChain, rt: PageRuntime, event: EventState): PageH
 function locationOf(rt: PageRuntime, event: EventState) {
   return {
     search: searchRecord(event.url.searchParams),
-    pathname: event.url.pathname,
+    pathname: visiblePathOf(event),
     trailingSlash: rt.config.trailingSlash,
   };
 }

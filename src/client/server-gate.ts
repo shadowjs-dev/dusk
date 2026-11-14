@@ -70,6 +70,20 @@ function fieldOf(value: unknown, name: string): unknown {
 }
 
 /**
+ * The body of a gate request: the visible target, and `route` (the route-tree path) when a mapping moves it. The server
+ * runs the middleware of the route's chain and shows the middleware the visible URL.
+ */
+function gateBody(
+  options: GateOptions,
+  target: NavigationTarget,
+): { path: string; search: string; route?: string } {
+  const route = options.routePath?.(target.pathname);
+  return route === undefined || route === target.pathname
+    ? { path: target.pathname, search: target.search }
+    : { path: target.pathname, search: target.search, route };
+}
+
+/**
  * Asks the server whether a navigation to `pathname` may proceed. Resolves when it may; throws a
  * {@link NavigationRefusedError}, or the router's redirect, otherwise.
  */
@@ -85,7 +99,7 @@ async function checkWithServer(
       accept: "application/json",
       [NAV_CHECK_HEADER]: NAV_CHECK_VALUE,
     },
-    body: JSON.stringify({ path: target.pathname, search: target.search }),
+    body: JSON.stringify(gateBody(options, target)),
     credentials: "same-origin",
     ...(signal === undefined ? {} : { signal }),
   });
@@ -123,6 +137,8 @@ export interface GateOptions {
   readonly base: string;
   /** Origin of the page: a redirect inside it is a router navigation, any other is left to the browser. */
   readonly origin: string;
+  /** Maps a visible path to the route-tree path (see `hydrateDusk({ routePath })`); the gate asks about the mapped one. */
+  readonly routePath?: (path: string) => string;
   /** The fetch that asks the server (the page's own by default). */
   readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
   /** Leaves the app for another origin, as a document redirect would (`location.replace` in the page). */

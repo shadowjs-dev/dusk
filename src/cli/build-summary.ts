@@ -48,6 +48,12 @@ export interface BuildSummary {
   readonly routes: readonly RouteRow[];
   readonly shared: { readonly bytes: number | undefined; readonly files: number };
   readonly warnings: readonly string[];
+  /**
+   * Why prerendered pages are answered by the handler and not served as files (one line per reason, naming the pages),
+   * so a build that cannot serve its pages from the CDN says what to change.
+   * @since 1.1.0
+   */
+  readonly notes?: readonly string[];
   /** The total time of the build, in milliseconds. */
   readonly ms: number;
 }
@@ -244,6 +250,21 @@ export async function summarizeBuild(input: BuildSummaryInput): Promise<BuildSum
       middleware: 0,
     }))
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  // Pages answered by the handler, grouped by why: the build says it once per reason.
+  const byReason = new Map<string, string[]>();
+  for (const page of manifest.staticPages) {
+    if (page.mode !== "handler" || page.reason === undefined) continue;
+    const list = byReason.get(page.reason) ?? [];
+    list.push(page.path);
+    byReason.set(page.reason, list);
+  }
+  const notes = [...byReason].map(([reason, paths]) => {
+    const shown =
+      paths.length > 5
+        ? `${paths.slice(0, 5).join(", ")} and ${paths.length - 5} more`
+        : paths.join(", ");
+    return `${shown} ${paths.length === 1 ? "is" : "are"} prerendered but answered by the handler on every request: ${reason}.`;
+  });
   return {
     version: input.version,
     outDir: input.outDir ?? "dist",
@@ -255,6 +276,7 @@ export async function summarizeBuild(input: BuildSummaryInput): Promise<BuildSum
     routes: [...pages, ...apis, ...streams],
     shared: { bytes: sharedBytes, files: shell.length },
     warnings,
+    ...(notes.length === 0 ? {} : { notes }),
     ms: input.ms,
   };
 }

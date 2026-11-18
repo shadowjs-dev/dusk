@@ -250,7 +250,7 @@ describe("the Bun and Deno static responder follows the decision", () => {
       {
         routing: validateRouting({}, {}),
         wholeApp:
-          "src/entry-server.ts sets a global middleware (options.middleware), which runs for every request",
+          "src/entry-server.ts sets a global middleware (options.middleware), which runs for every request (a middleware in a _middleware folder or a route covers only its own paths, so the other pages can be served as files)",
         pages: [{ path: "/about", html: "<p>about file</p>", routeMiddleware: false }],
       },
       true,

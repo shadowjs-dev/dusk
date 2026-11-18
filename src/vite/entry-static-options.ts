@@ -410,7 +410,7 @@ function middlewareReason(value: EntryNode, shown: string): string | undefined {
   if (value.type === "ArrayExpression") {
     const elements = value["elements"];
     if (Array.isArray(elements) && elements.length === 0) return undefined;
-    return `${shown} sets a global middleware (options.middleware), which runs for every request`;
+    return `${shown} sets a global middleware (options.middleware), which runs for every request (a middleware in a _middleware folder or a route covers only its own paths, so the other pages can be served as files)`;
   }
   return `${shown} sets options.middleware to a value the build cannot read`;
 }

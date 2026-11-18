@@ -19,6 +19,7 @@ import {
   type ViteDevServer,
 } from "vite";
 import { assertBundle, type BundleFile } from "../adapter/checks";
+import { type FileHeaders, fileHeadersOf } from "../adapter/file-headers";
 import { staticFilesMiddlewareWarning } from "../adapter/static-files";
 import { type StaticPageInput, staticPagesOf } from "../adapter/static-pages";
 import type { AdapterContext, AdapterRoute } from "../adapter/types";
@@ -101,6 +102,7 @@ import {
   type ResolvedDuskOptions,
   resolveOptions,
 } from "./options";
+import { prerenderOffWarning } from "./prerender-off";
 import {
   analyzeFile,
   checkCollisions,
@@ -586,6 +588,8 @@ export function duskCore(
     readonly allowedHosts: readonly string[] | undefined;
     /** `runMiddlewareForStaticFiles` of the merged options: the handler runs its middleware for files. */
     readonly runMiddlewareForStaticFiles: boolean;
+    /** The header rules as they apply to the client folder's files (prerendered pages excluded). */
+    readonly fileHeaders: FileHeaders[];
   }> {
     const ignoreCase = resolvedOptions.router.caseSensitive !== true;
     const source = routeMiddlewareSource(scan);
@@ -649,7 +653,51 @@ export function duskCore(
       ),
       allowedHosts: hostsKnown && hosts.length > 0 ? hosts : undefined,
       runMiddlewareForStaticFiles: merged.runMiddlewareForStaticFiles === true,
+      fileHeaders: fileHeadersOf(
+        await clientFilePaths(
+          clientDir,
+          // A prerendered path is a page, whatever its type: its headers come from `staticPagesOf`.
+          new Set(
+            paths.flatMap((path) => [
+              outputFileFor(path, format, "text/html; charset=utf-8").split(sep).join("/"),
+              path.slice(1),
+            ]),
+          ),
+        ),
+        routing,
+        ignoreCase,
+      ),
     };
+  }
+
+  /**
+   * The URL paths of every file in the client folder except the prerendered pages' own files (`skip`, relative paths
+   * with forward slashes). Iterative: the folders nest as deep as the app's `public/` does.
+   */
+  async function clientFilePaths(clientDir: string, skip: ReadonlySet<string>): Promise<string[]> {
+    const found: string[] = [];
+    const pending = [clientDir];
+    for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+      let entries: Dirent[];
+      try {
+        entries = await readdir(current, { withFileTypes: true });
+      } catch (error) {
+        if (isMissing(error)) continue;
+        throw error;
+      }
+      for (const entry of entries) {
+        const full = join(current, entry.name);
+        if (entry.isDirectory()) {
+          pending.push(full);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const file = relative(clientDir, full).split(sep).join("/");
+        if (skip.has(file) || file.startsWith(".vite/")) continue;
+        found.push(`/${file}`);
+      }
+    }
+    return found.sort();
   }
 
   /** The HTML a prerendered path was written to; `undefined` for a path whose file is not HTML (a feed, a sitemap). */
@@ -707,6 +755,7 @@ export function duskCore(
     adapterLog: string[],
     allowedHosts: readonly string[] | undefined,
     runMiddlewareForStaticFiles: boolean,
+    fileHeaders: readonly FileHeaders[],
   ): Promise<void> {
     const adapter = opts().adapter;
     if (adapter === undefined) return;
@@ -764,6 +813,7 @@ export function duskCore(
       staticPages: manifest.staticPages ?? [],
       ...(allowedHosts === undefined ? {} : { allowedHosts }),
       ...(runMiddlewareForStaticFiles ? { runMiddlewareForStaticFiles: true } : {}),
+      ...(fileHeaders.length === 0 ? {} : { fileHeaders }),
       log: (message) => {
         adapterLog.push(message);
         if (state.config !== undefined) state.config.logger.info(`[${adapter.name}] ${message}`);
@@ -911,7 +961,12 @@ export function duskCore(
     await timed("server", () => builder.build(ssr));
     let prerendered: string[] = [];
     const prerenderSettings = prerenderOf();
-    if (prerenderSettings !== false) {
+    if (prerenderSettings === false) {
+      const overridden = prerenderOffOverrides(scan);
+      if (overridden.length > 0) {
+        state.config?.logger.warn(prerenderOffWarning(overridden));
+      }
+    } else {
       prerendered = await timed("prerender", async () => {
         const entryFile = join(outRoot, "server", "entry.js");
         // Literal settings fail here, before the server is loaded; function settings need the server.
@@ -973,6 +1028,7 @@ export function duskCore(
           adapterLog,
           decision.allowedHosts,
           decision.runMiddlewareForStaticFiles,
+          decision.fileHeaders,
         ),
       );
     }
@@ -1026,6 +1082,18 @@ export function duskCore(
     return Object.entries(state.file?.config.routeRules ?? {})
       .filter(([, rule]) => rule.prerender === true)
       .map(([path]) => path);
+  }
+
+  /**
+   * The pages that ask to be prerendered (a route's `export const prerender = true`, or `routeRules[path].prerender`)
+   * while `prerender: false` turns prerendering off for the whole build, sorted.
+   */
+  function prerenderOffOverrides(scan: ScanResult): string[] {
+    const asked = new Set<string>(routeRulePrerenders());
+    for (const entry of scan.entries) {
+      if (entry.kind === "page" && entry.info.config.prerender === true) asked.add(entry.fullPath);
+    }
+    return [...asked].sort();
   }
 
   function prerenderOf(): false | PrerenderOptions {

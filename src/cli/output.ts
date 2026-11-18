@@ -648,6 +648,9 @@ export function buildLines(summary: BuildSummary, term: Terminal): string[] {
       lines.push(`${INDENT}  ${" ".repeat(nameWidth)}${paint(term, "dim", message)}`);
   }
   if (summary.routes.length > 0) lines.push("", ...routeTableLines(summary, term));
+  for (const note of summary.notes ?? []) {
+    lines.push("", `${INDENT}${paint(term, "dim", "note")} ${note}`);
+  }
   for (const warning of summary.warnings) {
     lines.push("", `${INDENT}${paint(term, "yellow", `${glyphs.warn} warn`)} ${warning}`);
   }

@@ -1,5 +1,6 @@
 import type { StaticPage } from "../shared/static-page";
 import type { DuskManifest } from "../vite/build";
+import type { FileHeaders } from "./file-headers";
 
 /**
  * The adapter contract of `dusk({ adapter })`. An adapter turns the build output (the client
@@ -96,6 +97,14 @@ export interface AdapterContext {
    * cannot do that warns (see `staticFilesMiddlewareWarning`) and one that can wires the gate (the Cloudflare Worker).
    */
   readonly runMiddlewareForStaticFiles?: boolean;
+  /**
+   * The app's header rules (`headers`, `routeRules[...].headers`, without conditions) as they apply to the files of the
+   * client folder, grouped by identical headers (see `fileHeadersOf`). An adapter whose platform serves files before any
+   * code runs writes them into its routing (Vercel), so a rule for `/fonts/*` reaches the fonts. Absent or empty: no
+   * rule applies to a file.
+   * @since 1.1.0
+   */
+  readonly fileHeaders?: readonly FileHeaders[];
   /** Writes a line to the build log. */
   log(message: string): void;
   /** Writes a file under `outDir` (creating folders). Rejects paths that leave `outDir`. */

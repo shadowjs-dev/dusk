@@ -12,6 +12,7 @@
 
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { FileHeaders } from "../adapter/file-headers";
 import { hostListSource } from "../adapter/host-routes";
 import { IMMUTABLE_CACHE_CONTROL, immutableFolders } from "../adapter/immutable";
 import { namesMentionedIn, packageClosure, RUNTIME_PACKAGES } from "../adapter/packages";
@@ -33,6 +34,8 @@ export interface VercelAdapterOptions {
   readonly functionName?: string;
 }
 
+/** Files per header route: a group of more files is written as several routes. @internal */
+const FILES_PER_ROUTE = 100;
 const FUNCTION_NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const NODE_VERSION = /^nodejs\d{1,2}\.x$/;
 
@@ -110,6 +113,7 @@ export function vercel(options: VercelAdapterOptions = {}): Adapter {
               fn,
               immutableFolders(context.manifest),
               context.allowedHosts,
+              context.fileHeaders,
             ),
           },
           null,
@@ -205,8 +209,10 @@ function fileFormsSource(path: string): string {
  *    rules and the host routing run for it, and its prerendered file is not served;
  * 2. a static page with headers gets them from a route that only adds headers (`continue: true`, as the Vercel
  *    `headers` conversion does): the file still comes from the CDN, and no function runs for it;
- * 3. the immutable folders get their year-long rule the same way, before the filesystem handler;
- * 4. the filesystem handler; then, for an immutable folder, a missing file is a `no-store` 404 (a year-long rule must
+ * 3. the files the app's header rules apply to (`headers`, `routeRules[...].headers`) get them the same way, one route
+ *    per group of files with the same headers, matching the exact paths;
+ * 4. the immutable folders get their year-long rule the same way, after the app's rules, so a hashed asset keeps it;
+ * 5. the filesystem handler; then, for an immutable folder, a missing file is a `no-store` 404 (a year-long rule must
  *    not stick to a fall-through response); then the catch-all to the function.
  * Before all of them, when the app lists its hosts (`security.allowedHosts`), a request whose Host is not listed goes to
  * the function first (`missing` host condition): the function answers the handler's 400, and no file is served.
@@ -214,6 +220,7 @@ function fileFormsSource(path: string): string {
  * @param fn The function name.
  * @param immutable The URL folders of the immutable files (see `immutableFolders`).
  * @param allowedHosts The app's host list; absent or empty for no host routing.
+ * @param fileHeaders The app's header rules as they apply to the client files (see `fileHeadersOf`).
  * @internal
  */
 export function vercelRoutes(
@@ -221,6 +228,7 @@ export function vercelRoutes(
   fn: string,
   immutable: readonly string[] = [],
   allowedHosts: readonly string[] = [],
+  fileHeaders: readonly FileHeaders[] = [],
 ): Array<Record<string, unknown>> {
   const routes: Array<Record<string, unknown>> = [];
   if (allowedHosts.length > 0) {
@@ -248,6 +256,17 @@ export function vercelRoutes(
       headers: Object.fromEntries(headers),
       continue: true,
     });
+  }
+  for (const group of fileHeaders) {
+    // Many files make a long expression; a route per chunk keeps each one readable and well under any limit.
+    for (let start = 0; start < group.paths.length; start += FILES_PER_ROUTE) {
+      const chunk = group.paths.slice(start, start + FILES_PER_ROUTE);
+      routes.push({
+        src: `^(?:${chunk.map((path) => escapeRegex(path)).join("|")})$`,
+        headers: Object.fromEntries(group.headers),
+        continue: true,
+      });
+    }
   }
   for (const folder of immutable) {
     routes.push({

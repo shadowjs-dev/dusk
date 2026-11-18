@@ -10,6 +10,7 @@
  * - CLI-44 each row names its family (the symbol of the table), the size only its page loads, and whether it is over its
  *   budget; a file shared by many routes is read once, and no more than READ_CONCURRENCY files are read at a time.
  * - CLI-27 a prerendered page the handler answers is `static (via handler)`; a page that is a file is `static (file)`.
+ * - CLI-48 the summary says why prerendered pages are answered by the handler, once per reason, naming the pages.
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -218,6 +219,40 @@ describe("dusk build summary", () => {
       ms: 1,
     });
     expect(fileOnly.routes.find((row) => row.path === "/")?.kind).toBe("static (file)");
+    expect(fileOnly.notes).toBeUndefined();
+  });
+
+  it("[CLI-48] the summary names the pages the handler answers and why, once per reason", async () => {
+    const { dir } = clientFolder(FILES);
+    const file = join(dir, "dusk-manifest.json");
+    const handler = (path: string, reason: string) => ({
+      path,
+      mode: "handler",
+      headers: [],
+      httpsHeaders: [],
+      reason,
+    });
+    const staticPages = [
+      handler("/", "a global middleware runs"),
+      handler("/ar", "a global middleware runs"),
+      handler("/old", "a redirect rule matches the path"),
+      { path: "/posts/1", mode: "static", headers: [], httpsHeaders: [], reason: undefined },
+    ];
+    writeFileSync(file, JSON.stringify(manifestOf({ staticPages })));
+    const manifest = await readBuildManifest(file);
+    if (manifest === undefined) throw new Error("the manifest was not read");
+    const summary = await summarizeBuild({
+      version: "0.0.0",
+      manifest,
+      clientDir: dir,
+      report: undefined,
+      budgets: undefined,
+      ms: 1,
+    });
+    expect(summary.notes).toEqual([
+      "/, /ar are prerendered but answered by the handler on every request: a global middleware runs.",
+      "/old is prerendered but answered by the handler on every request: a redirect rule matches the path.",
+    ]);
   });
 
   it("[CLI-25] middleware counts the _middleware files of the route's folder and above it", async () => {

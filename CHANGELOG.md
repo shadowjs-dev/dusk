@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- On Vercel, the `headers` rules and route-rule headers without conditions now reach the files the CDN serves (`public/` and the build output): the build writes them into `.vercel/output/config.json` as header routes before the filesystem, matching the exact file paths. A rule such as `{ source: "/fonts/*", headers: { "cache-control": "public, max-age=31536000, immutable" } }` no longer needs a post-build script. Headers a file response owns are never written, and hashed assets keep their year-long rule.
+- `dusk build` prints a note for each reason prerendered pages are answered by the handler, naming the pages (for example a global middleware in the entry), with how to keep the other pages files.
+- A build where `prerender: false` turns prerendering off while routes (`export const prerender = true`) or route rules (`prerender: true`) ask for it warns and names those pages, instead of rendering them per request without a word.
+
 ## 1.0.6
 
 ### Added

@@ -52,7 +52,7 @@ const STYLE_ELEMENT = /<style\b([^>]*)>([\s\S]*?)<\/style\s*>/gi;
 const DATA_SCRIPT_TYPES: ReadonlySet<string> = new Set(["application/json", "application/ld+json"]);
 
 /** Headers a static file's response is built from, not taken from the app: they never reach a page's file. @internal */
-const FILE_OWNED: ReadonlySet<string> = new Set([
+export const FILE_OWNED: ReadonlySet<string> = new Set([
   "content-type",
   "content-length",
   "content-encoding",

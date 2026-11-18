@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+
+- The optional `satori` peer accepts `^0.43.0 || ^0.63.0` (it accepted 0.43 only), so an app on satori 0.63, the version Dusk is tested with, installs without a peer conflict.
+
 ## 1.1.0
 
 ### Added

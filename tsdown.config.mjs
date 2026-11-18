@@ -27,7 +27,8 @@ function shadowCompile(generate, dev) {
         });
         return {
           code: result.code,
-          map: result.map ?? { mappings: "" },
+          // `null` for a module the compiler left unchanged: its code did not move, so it keeps its own map.
+          map: result.map ?? null,
           moduleType: "ts",
         };
       },

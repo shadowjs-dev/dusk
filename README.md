@@ -360,8 +360,8 @@ For the errors in the table below, a production build keeps a short code instead
 - Runtime `@shadow-js/vite` `1.0.4`: the Vite plugin the framework builds on (`src/vite/index.ts`).
 - Runtime `acorn` `8.19.0`: parses modules for build checks (`src/adapter/checks.ts`).
 - Runtime `magic-string` `^1.4.3`: edits code in the Vite plugin and server-function transform.
-- Peers: `@shadow-js/core`, `@shadow-js/router`, and `@shadow-js/web` `^1.1.1`: the runtime, routing, and rendering the app uses.
-- Optional peers: `@shadow-js/i18n` `^1.1.1` for locale routing (`src/i18n`) and `vite` `^7.0.0 || ^8.0.0` for the dev server and build.
+- Peers: `@shadow-js/core`, `@shadow-js/router`, and `@shadow-js/web` `^1.1.2`: the runtime, routing, and rendering the app uses.
+- Optional peers: `@shadow-js/i18n` `^1.1.2` for locale routing (`src/i18n`) and `vite` `^7.0.0 || ^8.0.0` for the dev server and build.
 - Optional peers: `satori` `^0.43.0 || ^0.63.0` and `@resvg/resvg-wasm` `^2.6.2`: renderers for Open Graph images (`src/og`).
 - Optional peers: `sharp` `^0.35.5`: the image optimizer's `sharpProcessor` and the build-time `imageVariants()`. `subset-font` `^2.9.0`: build-time font subsetting.
 
